@@ -270,10 +270,15 @@ const unlockFields = (mode, title, m, levelText) => {
   const { game, prev, started, next } = graphs[mode].get(title);
   return {
     trader: game?.trader || m.trader || 'Прочее',
-    level: game?.level || m.level || (levelText ? parseInt(levelText[1], 10) : 0),
+    // The wiki level is often stale, so it is used only where the game files say nothing.
+    level: game && !game.bare ? game.level : m.level || (levelText ? parseInt(levelText[1], 10) : 0),
     prev,
     started,
     loyalty: game?.loyalty ?? [],
+    // 0 for a quest the game files do not have.
+    tier: game?.tier ?? 0,
+    feeds: game?.feeds ?? false,
+    counters: game?.counters ?? [],
     gates: game?.gates ?? [],
     next,
   };

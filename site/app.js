@@ -81,12 +81,23 @@
   const llOf = (trader) => (LEVELED.includes(trader) ? state.ll[trader] ?? 1 : 4);
   const lowLoyalty = (q) => q.loyalty.filter(([t, n]) => llOf(t) < n);
 
-  // 'hidden' quests wait for something the site cannot follow; the game does
-  // not list them at all until then.
+  // A trader's counter: quests done for them at one loyalty level.
+  function doneAt(trader, tier) {
+    let n = 0;
+    for (const id in state.status) {
+      const q = byId.get(id);
+      if (state.status[id] === 'done' && q && q.feeds && q.trader === trader && q.tier === tier) n++;
+    }
+    return n;
+  }
+  const shortCounters = (q) => q.counters.filter(([tier, need]) => doneAt(q.trader, tier) < need);
+
+  // 'hidden' quests are not listed by the game at all yet: they wait for a
+  // trader's counter or for something the site cannot follow.
   function statusOf(q) {
     const s = state.status[q.id];
     if (s) return s;
-    if (q.gates.length) return 'hidden';
+    if (q.gates.length || shortCounters(q).length) return 'hidden';
     if (!q.prev.every(isDone) || !q.started.every(isTaken)) return 'locked';
     if (state.level && q.level > state.level) return 'locked';
     if (!llOf(q.trader) || lowLoyalty(q).length) return 'locked';
@@ -125,7 +136,8 @@
   function complete(id) {
     const before = new Set(quests.filter((q) => statusOf(q) === 'available').map((q) => q.id));
     state.status[id] = 'done';
-    const opened = byId.get(id).next.filter((n) => !before.has(n) && statusOf(byId.get(n)) === 'available');
+    // Not only the next quests in the chain: a finished quest also moves the trader's counter.
+    const opened = quests.filter((q) => !before.has(q.id) && statusOf(q) === 'available' && visible(q)).map((q) => q.id);
     toast(opened.length ? `Открыты новые квесты: ${opened.join(', ')}` : 'Квест завершён');
   }
 
@@ -196,7 +208,7 @@
       </button>`;
   }
 
-  const needLoyalty = (q) => Math.max(1, ...q.loyalty.filter(([t]) => t === q.trader).map(([, n]) => n));
+  const needLoyalty = (q) => Math.max(1, q.tier, ...q.loyalty.filter(([t]) => t === q.trader).map(([, n]) => n));
 
   const onMap = (q) => !state.map || q.maps.includes(state.map);
 
@@ -326,7 +338,10 @@
     if (!llOf(q.trader)) parts.push(`торговец «${esc(q.trader)}» ещё закрыт`);
     for (const [t, n] of lowLoyalty(q)) if (llOf(t)) parts.push(`нужен ${ROMAN[n]} уровень лояльности у торговца «${esc(t)}» (у вас ${ROMAN[llOf(t)]})`);
     if (st === 'hidden') {
-      return `<div class="lock-reason">В игре этот квест не виден, пока не выполнено условие: ${q.gates.map(esc).join('; ')}${parts.length ? `. Кроме того: ${parts.join('; ')}` : ''}. Сайт не может это отследить — когда квест появится у торговца, нажмите «Я сейчас на этом квесте».</div>`;
+      const counters = shortCounters(q).map(([tier, need]) => `выполните у торговца «${esc(q.trader)}» квестов ${ROMAN[tier]} уровня лояльности: ${need} (сейчас ${doneAt(q.trader, tier)})`);
+      const more = parts.length ? `. Кроме того: ${parts.join('; ')}` : '';
+      if (!q.gates.length) return `<div class="lock-reason">В игре этот квест появится позже — ${counters.join('; ')}${more}</div>`;
+      return `<div class="lock-reason">В игре этот квест не виден, пока не выполнено условие: ${[...q.gates.map(esc), ...counters].join('; ')}${more}. Сайт не может это отследить — когда квест появится у торговца, нажмите «Я сейчас на этом квесте».</div>`;
     }
     return parts.length ? `<div class="lock-reason">Заблокирован — ${parts.join('; ')}</div>` : '';
   }
