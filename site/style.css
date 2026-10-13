@@ -128,7 +128,16 @@ button { cursor: pointer; }
 
 .sidebar { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); }
 .list-filters { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
-.list-filters .act-btn { flex: 1; padding: 7px 8px; font-size: 13px; white-space: nowrap; }
+.list-filters .act-btn {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 7px 6px;
+  font-size: 12px;
+  letter-spacing: .04em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .list { overflow-y: auto; flex: 1; padding-bottom: 20px; }
 
 .group {
