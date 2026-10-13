@@ -297,6 +297,8 @@ await pool(titles, 4, async (title) => {
   const pveDiff = Object.fromEntries(Object.entries(pve).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(pvp[k])));
   const inPvp = !!graphs.pvp.get(title).game;
   const inPve = !!graphs.pve.get(title).game;
+  // A quest the game files have is in the game now, whatever the wiki calls it.
+  const current = inPvp || inPve;
   quests.push({
     id: title,
     ...pvp,
@@ -308,7 +310,7 @@ await pool(titles, 4, async (title) => {
     type: m.type,
     kappa: m.kappa,
     flags: [
-      (flagSets.event.has(title) || m.eventTpl) && 'event',
+      (flagSets.event.has(title) || m.eventTpl) && !current && 'event',
       flagSets.arena.has(title) && 'arena',
       flagSets.seasonal.has(title) && 'seasonal',
       flagSets.story.has(title) && 'story',

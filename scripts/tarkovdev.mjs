@@ -8,6 +8,10 @@ import { loyaltyFields } from './enwiki.mjs';
 export const MODES = { pvp: 'regular', pve: 'pve' };
 const BASE = 'https://json.tarkov.dev';
 const CACHE_DIR = path.resolve(import.meta.dirname, '..', '.cache');
+// Links checked in the game itself; they win over every other source.
+// The file is kept out of the repository, so a fresh clone builds without it.
+const OBSERVED = await readFile(path.resolve(import.meta.dirname, 'observed.json'), 'utf8')
+  .then((text) => JSON.parse(text).rules, () => ({ counterTier: { quests: {} }, noFeed: { quests: [] }, started: {} }));
 
 async function json(mode, name) {
   const file = path.join(CACHE_DIR, `tarkovdev-${mode}-${name}.json`);
@@ -66,7 +70,7 @@ export const taskKey = (name) => name
 // Which loyalty level each counter belongs to. A counter is the number of
 // quests done for one trader at one loyalty level; tarkov.dev gives only its
 // id, the English wiki gives the level of the quests that wait for it.
-function counterTiers(list, wiki) {
+function counterTiers(list, wiki, keyOf) {
   const votes = new Map();
   for (const t of list) {
     const tier = wiki.get(t.id)?.tier;
@@ -76,7 +80,12 @@ function counterTiers(list, wiki) {
       v.set(tier, (v.get(tier) ?? 0) + 1);
     }
   }
-  return new Map([...votes].map(([id, v]) => [id, [...v].sort((a, b) => b[1] - a[1])[0][0]]));
+  const tiers = new Map([...votes].map(([id, v]) => [id, [...v].sort((a, b) => b[1] - a[1])[0][0]]));
+  const seen = new Map(Object.entries(OBSERVED.counterTier.quests).map(([name, tier]) => [taskKey(name), tier]));
+  for (const t of list) {
+    if (seen.has(keyOf.get(t.id))) for (const r of counterReqs(t)) tiers.set(r.variableId, seen.get(keyOf.get(t.id)));
+  }
+  return tiers;
 }
 
 // Map(taskKey -> { level, trader, requires: [{ key, done }], loyalty, tier, feeds, counters, gates }).
@@ -84,15 +93,17 @@ function counterTiers(list, wiki) {
 export async function gameTasks(mode) {
   const [tasks, ru, en] = await Promise.all([json(mode, 'tasks'), json(mode, 'tasks_ru'), json(mode, 'tasks_en')]);
   const list = Object.values(tasks.data.tasks);
+  const keyOf = new Map(list.map((t) => [t.id, taskKey(ru.data[t.name] ?? t.name)]));
   const enName = (t) => en.data[t.name] ?? '';
   const byTitle = await loyaltyFields([...new Set(list.map(enName).filter(Boolean))]);
   const wiki = new Map(list.map((t) => [t.id, byTitle.get(enName(t))]));
-  const tierOf = counterTiers(list, wiki);
+  const tierOf = counterTiers(list, wiki, keyOf);
+  const noFeed = new Set(OBSERVED.noFeed.quests.map(taskKey));
+  const startedSeen = new Map(Object.entries(OBSERVED.started[mode] ?? {}).map(([name, taken]) => [taskKey(name), taken.map(taskKey)]));
   let agree = 0, differ = 0;
   for (const t of list) for (const r of counterReqs(t)) if (wiki.get(t.id)?.count) (wiki.get(t.id).count === r.value ? agree++ : differ++);
   const all = new Set(list.flatMap((t) => counterReqs(t).map((r) => r.variableId)));
   console.log(`  ${mode} — counters tied to a loyalty level: ${tierOf.size} of ${all.size}; values checked against the EN wiki: ${agree} match, ${differ} differ`);
-  const keyOf = new Map(list.map((t) => [t.id, taskKey(ru.data[t.name] ?? t.name)]));
   const seen = new Map();
   for (const key of keyOf.values()) seen.set(key, (seen.get(key) ?? 0) + 1);
   const out = new Map();
@@ -113,9 +124,12 @@ export async function gameTasks(mode) {
       bare: !t.minPlayerLevel && !t.taskRequirements.length && !t.traderRequirements.length && !(t.otherRequirements ?? []).length,
       trader,
       // done: the earlier quest must be completed; otherwise taking it is enough.
-      requires: t.taskRequirements
-        .filter((r) => r.status.some((s) => s !== 'failed'))
-        .map((r) => ({ key: keyOf.get(r.task), done: !r.status.includes('active') })),
+      requires: [
+        ...t.taskRequirements
+          .filter((r) => r.status.some((s) => s !== 'failed'))
+          .map((r) => ({ key: keyOf.get(r.task), done: !r.status.includes('active') })),
+        ...(startedSeen.get(key) ?? []).map((k) => ({ key: k, done: false })),
+      ],
       loyalty,
       tier,
       // Whether finishing the quest moves the counter of its loyalty level.
@@ -123,7 +137,7 @@ export async function gameTasks(mode) {
       // profile, where quests started by a talk with the trader did not count,
       // except the trader's very first one (the only such quest with a level).
       // It errs towards counting too few: a quest then shows up late, not early.
-      feeds: !(t.otherRequirements ?? []).some((r) => r.type === 'dialogue') || t.minPlayerLevel > 0,
+      feeds: !noFeed.has(key) && (!(t.otherRequirements ?? []).some((r) => r.type === 'dialogue') || t.minPlayerLevel > 0),
       // [loyalty level, how many quests of that level must be done for this trader]
       counters,
       gates: gates(t, (id) => ru.data[tasks.data.tasks[id]?.name] ?? '?', tierOf),
