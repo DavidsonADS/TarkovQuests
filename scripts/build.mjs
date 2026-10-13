@@ -5,7 +5,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as cheerio from 'cheerio';
 import { WIKI, categoryMembers, wikitexts, parsedHtml, redirects, pool } from './wiki.mjs';
-import { gameTasks, taskKey } from './tarkovdev.mjs';
+import { MODES, gameTasks, taskKey } from './tarkovdev.mjs';
 
 const OUT = path.resolve(import.meta.dirname, '..', 'site', 'data', 'quests.js');
 const TRADER_ORDER = ['Прапор', 'Терапевт', 'Скупщик', 'Лыжник', 'Миротворец', 'Механик', 'Барахольщик', 'Егерь', 'Реф', 'Смотритель', 'Водитель БТР'];
@@ -206,63 +206,78 @@ const resolve = (l) => (questTitles.has(l) ? l : questTitles.has(redirectMap.get
 const unresolved = [...unknownLinks].filter((l) => !resolve(l));
 console.log(`  Unresolved quest links (${unresolved.length}): ${unresolved.slice(0, 40).join(' | ')}`);
 
-const prereqs = new Map(titles.map((t) => [t, new Set()]));
-// Links the later quest names itself; a link known only from the "next" field
-// of the earlier page is weaker and is the first to go when chains loop.
-const confirmed = new Map(titles.map((t) => [t, new Set()]));
-for (const [title, m] of meta) {
-  for (const p of m.prev.map(resolve)) if (p && p !== title) { prereqs.get(title).add(p); confirmed.get(title).add(p); }
-  for (const n of m.next.map(resolve)) if (n && n !== title) prereqs.get(n).add(title);
-}
-
-// The game files know better than the wiki which quests a quest waits for.
-console.log('Fetching unlock conditions from tarkov.dev…');
-const game = await gameTasks();
 const titleByKey = new Map(titles.filter((t) => !meta.get(t).historical).map((t) => [taskKey(t), t]));
-const gameOf = (title) => (meta.get(title).historical ? undefined : game.get(taskKey(title)));
-// A quest that must only be taken or failed opens together with it.
-function gamePrereqs(key, seen = new Set()) {
-  const out = new Set();
-  if (seen.has(key)) return out;
-  seen.add(key);
-  for (const r of game.get(key)?.requires ?? []) {
-    if (r.done) { if (titleByKey.has(r.key)) out.add(titleByKey.get(r.key)); } else for (const p of gamePrereqs(r.key, seen)) out.add(p);
+
+// Unlock conditions of every quest in one game mode:
+// Map(title -> { game, prev, started, next }), where `game` is the tarkov.dev entry.
+function unlockGraph(mode, game) {
+  const prereqs = new Map(titles.map((t) => [t, new Set()]));
+  // Links the later quest names itself; a link known only from the "next" field
+  // of the earlier page is weaker and is the first to go when chains loop.
+  const confirmed = new Map(titles.map((t) => [t, new Set()]));
+  for (const [title, m] of meta) {
+    for (const p of m.prev.map(resolve)) if (p && p !== title) { prereqs.get(title).add(p); confirmed.get(title).add(p); }
+    for (const n of m.next.map(resolve)) if (n && n !== title) prereqs.get(n).add(title);
   }
-  return out;
-}
-const sourced = { game: 0, cleared: 0, counter: 0, wiki: 0 };
-for (const title of titles) {
-  const g = gameOf(title);
-  if (!g) sourced.wiki++;
-  else if (g.counter && !g.requires.length) sourced.counter++;
-  else {
+
+  // The game files know better than the wiki which quests a quest waits for.
+  const gameOf = (title) => (meta.get(title).historical ? undefined : game.get(taskKey(title)));
+  const gameLinks = (title, done) => (gameOf(title)?.requires ?? []).filter((r) => r.done === done && titleByKey.has(r.key)).map((r) => titleByKey.get(r.key));
+  const sourced = { game: 0, cleared: 0, wiki: 0 };
+  for (const title of titles) {
+    const g = gameOf(title);
+    if (!g) { sourced.wiki++; continue; }
     if (g.requires.length) sourced.game++; else if (prereqs.get(title).size) sourced.cleared++;
-    prereqs.set(title, gamePrereqs(taskKey(title)));
+    prereqs.set(title, new Set(gameLinks(title, true)));
     confirmed.set(title, new Set(prereqs.get(title)));
   }
-}
-console.log(`  from tarkov.dev: ${sourced.game}, wiki links dropped: ${sourced.cleared}, opened by a counter (wiki kept): ${sourced.counter}, not in tarkov.dev (wiki kept): ${sourced.wiki}`);
+  console.log(`  ${mode} — from tarkov.dev: ${sourced.game}, wiki links dropped: ${sourced.cleared}, not in tarkov.dev (wiki kept): ${sourced.wiki}`);
 
-// A loop locks its quests for good. Drop the weakest link: one the later quest
-// does not name, into a quest that lists other prerequisites itself.
-function loopLink() {
-  const reach = (from, to, seen = new Set()) => from === to || (!seen.has(from) && seen.add(from) && [...prereqs.get(from)].some((p) => reach(p, to, seen)));
-  const links = [];
-  for (const [title, set] of prereqs) for (const p of set) if (reach(p, title)) links.push([p, title]);
-  if (!links.length) return null;
-  const weak = links.filter(([p, title]) => !confirmed.get(title).has(p));
-  return weak.find(([, title]) => confirmed.get(title).size) ?? weak[0] ?? links[0];
+  // A loop locks its quests for good. Drop the weakest link: one the later quest
+  // does not name, into a quest that lists other prerequisites itself.
+  function loopLink() {
+    const reach = (from, to, seen = new Set()) => from === to || (!seen.has(from) && seen.add(from) && [...prereqs.get(from)].some((p) => reach(p, to, seen)));
+    const links = [];
+    for (const [title, set] of prereqs) for (const p of set) if (reach(p, title)) links.push([p, title]);
+    if (!links.length) return null;
+    const weak = links.filter(([p, title]) => !confirmed.get(title).has(p));
+    return weak.find(([, title]) => confirmed.get(title).size) ?? weak[0] ?? links[0];
+  }
+  for (let link; (link = loopLink());) {
+    console.log(`  loop broken: «${link[0]}» is no longer required for «${link[1]}»`);
+    prereqs.get(link[1]).delete(link[0]);
+  }
+  // The Collector opens only after every Kappa quest; the wiki infobox lists none.
+  if (prereqs.has(COLLECTOR)) {
+    for (const [title, m] of meta) if (m.kappa && !m.historical && title !== COLLECTOR) prereqs.get(COLLECTOR).add(title);
+  }
+  const unlocks = new Map(titles.map((t) => [t, []]));
+  for (const [title, set] of prereqs) for (const p of set) unlocks.get(p).push(title);
+  return new Map(titles.map((t) => [t, {
+    game: gameOf(t),
+    prev: [...prereqs.get(t)].sort(),
+    // Quests that only have to be taken, not finished.
+    started: gameLinks(t, false).sort(),
+    next: unlocks.get(t).sort(),
+  }]));
 }
-for (let link; (link = loopLink());) {
-  console.log(`  loop broken: «${link[0]}» is no longer required for «${link[1]}»`);
-  prereqs.get(link[1]).delete(link[0]);
-}
-// The Collector opens only after every Kappa quest; the wiki infobox lists none.
-if (prereqs.has(COLLECTOR)) {
-  for (const [title, m] of meta) if (m.kappa && !m.historical && title !== COLLECTOR) prereqs.get(COLLECTOR).add(title);
-}
-const unlocks = new Map(titles.map((t) => [t, []]));
-for (const [title, set] of prereqs) for (const p of set) unlocks.get(p).push(title);
+
+console.log('Fetching unlock conditions from tarkov.dev…');
+const graphs = {};
+for (const mode of Object.keys(MODES)) graphs[mode] = unlockGraph(mode, await gameTasks(mode));
+// What differs between the modes in one quest: its unlock conditions only.
+const unlockFields = (mode, title, m, levelText) => {
+  const { game, prev, started, next } = graphs[mode].get(title);
+  return {
+    trader: game?.trader || m.trader || 'Прочее',
+    level: game?.level || m.level || (levelText ? parseInt(levelText[1], 10) : 0),
+    prev,
+    started,
+    loyalty: game?.loyalty ?? [],
+    gates: game?.gates ?? [],
+    next,
+  };
+};
 
 console.log('Fetching rendered pages…');
 const quests = [];
@@ -272,12 +287,20 @@ await pool(titles, 4, async (title) => {
   // Same-line match only: "…лояльности: 4\nУровень персонажа: 40" is not level 4.
   const reqText = cheerio.load(page.requirements).text();
   const levelText = reqText.match(/уровень персонажа:?\s*(\d+)/i) ?? reqText.match(/(\d+)[ \t-]*(?:го\s+)?уров/i);
+  const pvp = unlockFields('pvp', title, m, levelText);
+  const pve = unlockFields('pve', title, m, levelText);
+  const pveDiff = Object.fromEntries(Object.entries(pve).filter(([k, v]) => JSON.stringify(v) !== JSON.stringify(pvp[k])));
+  const inPvp = !!graphs.pvp.get(title).game;
+  const inPve = !!graphs.pve.get(title).game;
   quests.push({
     id: title,
-    trader: m.trader || 'Прочее',
+    ...pvp,
+    // The base fields describe PvP; `pve` holds what differs there, and
+    // `only` marks a quest the other mode's game files do not have.
+    ...(Object.keys(pveDiff).length ? { pve: pveDiff } : {}),
+    ...(inPvp !== inPve ? { only: inPvp ? 'pvp' : 'pve' } : {}),
     maps: m.maps.filter((x) => x && !/^(любая|нет|-)$/i.test(x)),
     type: m.type,
-    level: gameOf(title)?.level || m.level || (levelText ? parseInt(levelText[1], 10) : 0),
     kappa: m.kappa,
     flags: [
       (flagSets.event.has(title) || m.eventTpl) && 'event',
@@ -286,8 +309,6 @@ await pool(titles, 4, async (title) => {
       flagSets.story.has(title) && 'story',
       m.historical && 'historical',
     ].filter(Boolean),
-    prev: [...prereqs.get(title)].sort(),
-    next: unlocks.get(title).sort(),
     wiki: `${WIKI}/wiki/${encodeURIComponent(title.replace(/ /g, '_'))}`,
     ...page,
     items: undefined,
@@ -336,5 +357,6 @@ await writeFile(OUT, `window.TQ_DATA = ${JSON.stringify(data)};\n`);
 const stat = (f) => quests.filter(f).length;
 console.log(`Done: ${quests.length} quests, ${(JSON.stringify(data).length / 1e6).toFixed(1)} MB`);
 console.log(`  with guide: ${stat((q) => q.guide)}, with goals: ${stat((q) => q.goals)}, with keys: ${stat((q) => q.keys.length)}, with level: ${stat((q) => q.level)}`);
+console.log(`  differ in PvE: ${stat((q) => q.pve)}, PvP only: ${stat((q) => q.only === 'pvp')}, PvE only: ${stat((q) => q.only === 'pve')}`);
 console.log(`  roots (no prereqs): ${stat((q) => !q.prev.length)}, event: ${stat((q) => q.flags.includes('event'))}, historical: ${stat((q) => q.flags.includes('historical'))}, arena: ${stat((q) => q.flags.includes('arena'))}`);
 console.log('  traders:', traders.map((t) => `${t.name} ${t.count}${t.image ? '' : ' (no image)'}`).join(', '));

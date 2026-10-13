@@ -5,6 +5,9 @@
   const STORE_KEY = 'tq-state-v1';
   const ACTIVE_TAB = '__active__';
   const HIDDEN_BY_DEFAULT = ['event', 'arena', 'seasonal', 'historical'];
+  // Traders with loyalty levels; the rest are always open.
+  const LEVELED = ['Прапор', 'Терапевт', 'Скупщик', 'Лыжник', 'Миротворец', 'Механик', 'Барахольщик', 'Егерь', 'Реф'];
+  const ROMAN = ['', 'I', 'II', 'III', 'IV'];
   const FLAG_LABELS = { event: 'ивент', arena: 'Arena', seasonal: 'сезонный', story: 'сюжет', historical: 'устарел' };
 
   const $ = (sel) => document.querySelector(sel);
@@ -15,11 +18,13 @@
     return;
   }
 
-  const byId = new Map(DATA.quests.map((q) => [q.id, q]));
+  // Quests as the chosen game mode has them; see useMode().
+  let quests = DATA.quests;
+  let byId = new Map(quests.map((q) => [q.id, q]));
 
   // ---------- state ----------
 
-  const defaults = { status: {}, level: 0, filters: {}, v: 2, autosave: true, trader: DATA.traders[0].name, map: '', selected: null, showDone: false, showLocked: false, kappa: false };
+  const defaults = { status: {}, level: 0, ll: {}, mode: 'pvp', profiles: {}, filters: {}, v: 2, autosave: true, trader: DATA.traders[0].name, map: '', selected: null, showDone: false, showLocked: false, kappa: false };
   let state = load();
 
   function load() {
@@ -39,13 +44,52 @@
     } catch {}
   }
 
+  // PvP and PvE are separate characters: each mode has its own quest data and
+  // its own progress. The other mode's progress waits in state.profiles.
+  const MODES = { pvp: 'PvP', pve: 'PvE' };
+  const emptyProfile = () => ({ status: {}, level: 0, ll: {} });
+  const cleanProfile = (p) => ({
+    status: Object.fromEntries(Object.entries(p?.status ?? {}).filter(([, s]) => s === 'active' || s === 'done')),
+    level: Math.max(0, Math.min(79, parseInt(p?.level, 10) || 0)),
+    ll: Object.fromEntries(Object.entries(p?.ll ?? {}).filter(([t, n]) => LEVELED.includes(t) && Number.isInteger(n) && n >= 0 && n <= 4)),
+  });
+
+  function useMode() {
+    const pve = state.mode === 'pve';
+    const list = DATA.quests.filter((q) => !q.only || q.only === state.mode).map((q) => (pve && q.pve ? { ...q, ...q.pve } : q));
+    const ids = new Set(list.map((q) => q.id));
+    const known = (id) => ids.has(id);
+    quests = list.map((q) => ({ ...q, prev: q.prev.filter(known), started: q.started.filter(known), next: q.next.filter(known) }));
+    byId = new Map(quests.map((q) => [q.id, q]));
+    if (!byId.has(state.selected)) state.selected = null;
+  }
+
+  function setMode(mode) {
+    if (mode === state.mode || !MODES[mode]) return;
+    state.profiles[state.mode] = { status: state.status, level: state.level, ll: state.ll };
+    Object.assign(state, cleanProfile(state.profiles[mode]), { mode });
+    delete state.profiles[mode];
+    useMode();
+  }
+  if (!MODES[state.mode]) state.mode = 'pvp';
+  useMode();
+
   const isDone = (id) => state.status[id] === 'done';
 
+  const isTaken = (id) => !!state.status[id];
+  // 0 means the trader is not unlocked yet.
+  const llOf = (trader) => (LEVELED.includes(trader) ? state.ll[trader] ?? 1 : 4);
+  const lowLoyalty = (q) => q.loyalty.filter(([t, n]) => llOf(t) < n);
+
+  // 'hidden' quests wait for something the site cannot follow; the game does
+  // not list them at all until then.
   function statusOf(q) {
     const s = state.status[q.id];
     if (s) return s;
-    if (!q.prev.every(isDone)) return 'locked';
+    if (q.gates.length) return 'hidden';
+    if (!q.prev.every(isDone) || !q.started.every(isTaken)) return 'locked';
     if (state.level && q.level > state.level) return 'locked';
+    if (!llOf(q.trader) || lowLoyalty(q).length) return 'locked';
     return 'available';
   }
 
@@ -79,7 +123,7 @@
   // ---------- actions ----------
 
   function complete(id) {
-    const before = new Set(DATA.quests.filter((q) => statusOf(q) === 'available').map((q) => q.id));
+    const before = new Set(quests.filter((q) => statusOf(q) === 'available').map((q) => q.id));
     state.status[id] = 'done';
     const opened = byId.get(id).next.filter((n) => !before.has(n) && statusOf(byId.get(n)) === 'available');
     toast(opened.length ? `Открыты новые квесты: ${opened.join(', ')}` : 'Квест завершён');
@@ -105,13 +149,13 @@
   // ---------- rendering ----------
 
   function renderTraders() {
-    const active = DATA.quests.filter((q) => state.status[q.id] === 'active').length;
+    const active = quests.filter((q) => state.status[q.id] === 'active').length;
     const tiles = [`
       <button class="trader ${state.trader === ACTIVE_TAB ? 'current' : ''}" data-trader="${ACTIVE_TAB}">
         <span class="portrait all">★</span><span class="tname">Активные</span>
         <span class="tcount">${active || '—'}</span>
       </button>`];
-    const kappa = DATA.quests.filter((q) => q.kappa && inCategory(q));
+    const kappa = quests.filter((q) => q.kappa && inCategory(q));
     const kappaDone = kappa.filter((q) => isDone(q.id)).length;
     const kappaTab = $('#kappa-tab');
     kappaTab.classList.toggle('current', state.kappa);
@@ -120,7 +164,7 @@
     kappaTab.querySelector('.kcount').textContent = `${kappaDone}/${kappa.length}`;
     kappaTab.style.setProperty('--done', `${kappa.length ? (kappaDone / kappa.length) * 100 : 0}%`);
     for (const t of DATA.traders) {
-      const all = DATA.quests.filter((q) => q.trader === t.name && inCategory(q));
+      const all = quests.filter((q) => q.trader === t.name && inCategory(q));
       if (!all.length && state.trader !== t.name) continue;
       // With the Kappa filter on, traders without Kappa quests stay in place but cannot be opened.
       const qs = all.filter(visible);
@@ -128,12 +172,16 @@
       const act = qs.filter((q) => statusOf(q) === 'active').length;
       const avail = qs.filter((q) => statusOf(q) === 'available').length;
       const done = qs.filter((q) => statusOf(q) === 'done').length;
+      const ll = llOf(t.name);
       tiles.push(`
-        <button class="trader ${state.trader === t.name ? 'current' : ''}" data-trader="${esc(t.name)}" title="${off ? 'Нет квестов для Каппы' : `Выполнено ${done} из ${qs.length}`}" ${off ? 'disabled' : ''}>
-          ${t.image ? `<img class="portrait" src="${esc(t.image)}" alt="">` : `<span class="portrait all">${esc(t.name[0])}</span>`}
-          <span class="tname">${esc(t.name)}</span>
-          <span class="tcount">${act ? `<b class="act">${act}</b>` : ''}${avail ? `<b class="avail">${avail}</b>` : ''}${!act && !avail ? '—' : ''}</span>
-        </button>`);
+        <div class="trader-slot">
+          <button class="trader ${state.trader === t.name ? 'current' : ''} ${ll ? '' : 'closed'}" data-trader="${esc(t.name)}" title="${off ? 'Нет квестов для Каппы' : `Выполнено ${done} из ${qs.length}`}" ${off ? 'disabled' : ''}>
+            ${t.image ? `<img class="portrait" src="${esc(t.image)}" alt="">` : `<span class="portrait all">${esc(t.name[0])}</span>`}
+            <span class="tname">${esc(t.name)}</span>
+            <span class="tcount">${act ? `<b class="act">${act}</b>` : ''}${avail ? `<b class="avail">${avail}</b>` : ''}${!act && !avail ? '—' : ''}</span>
+          </button>
+          ${LEVELED.includes(t.name) ? `<button class="ll" data-ll="${esc(t.name)}" title="Уровень лояльности: ${ll ? ROMAN[ll] : 'торговец закрыт'}. Нажмите, чтобы изменить" aria-label="Уровень лояльности, ${esc(t.name)}: ${ll || 'закрыт'}">${ll ? ROMAN[ll] : '🔒'}</button>` : ''}
+        </div>`);
     }
     $('#traders').innerHTML = tiles.join('');
   }
@@ -143,16 +191,18 @@
     const sub = [showTrader ? q.trader : '', q.maps.join(', '), q.level ? `ур. ${q.level}` : ''].filter(Boolean).join(' · ');
     return `
       <button class="row ${st} ${state.selected === q.id ? 'current' : ''}" data-quest="${esc(q.id)}">
-        <span class="rname">${esc(q.id)}${q.keys.length ? ' <span class="keymark" title="Нужен ключ">🔑</span>' : ''}</span>
+        <span class="rname">${esc(q.id)}${q.keys.length ? ' <span class="keymark" title="Нужен ключ">🔑</span>' : ''}${st === 'locked' ? '<span class="lockmark" title="Заблокирован">🔒</span>' : ''}</span>
         <span class="rsub">${esc(sub)}${q.flags.map((f) => ` <i class="flag ${f}">${FLAG_LABELS[f]}</i>`).join('')}</span>
       </button>`;
   }
+
+  const needLoyalty = (q) => Math.max(1, ...q.loyalty.filter(([t]) => t === q.trader).map(([, n]) => n));
 
   const onMap = (q) => !state.map || q.maps.includes(state.map);
 
   function renderMaps() {
     const counts = new Map();
-    for (const q of DATA.quests.filter(visible)) {
+    for (const q of quests.filter(visible)) {
       for (const m of q.maps) counts.set(m, (counts.get(m) ?? 0) + (state.status[q.id] === 'active' ? 1 : 0));
     }
     if (!counts.has(state.map)) state.map = '';
@@ -166,16 +216,16 @@
 
   function renderList() {
     const query = $('#search').value.trim().toLowerCase();
-    let pool = DATA.quests.filter(visible);
+    let pool = quests.filter(visible);
     let showTrader = false;
     const noKappa = state.kappa && !pool.some((q) => q.trader === state.trader);
     if (query) {
       // Search ignores the category filters so hidden event quests are still findable.
-      pool = DATA.quests.filter((q) => q.id.toLowerCase().includes(query));
+      pool = quests.filter((q) => q.id.toLowerCase().includes(query));
       showTrader = true;
     } else if (state.trader === ACTIVE_TAB) {
       // Every active quest is listed, like the counter on the tab: filters do not hide them.
-      pool = DATA.quests.filter((q) => statusOf(q) === 'active');
+      pool = quests.filter((q) => statusOf(q) === 'active');
       showTrader = true;
     } else {
       pool = pool.filter((q) => q.trader === state.trader);
@@ -189,13 +239,28 @@
       ['available', 'Доступные', true],
       ['locked', 'Заблокированные', state.showLocked || !!query],
       ['done', 'Завершённые', state.showDone || !!query],
+      ['hidden', 'Скрыты в игре', state.showLocked || !!query],
     ];
+    const shown = (q) => groups.find(([key]) => key === statusOf(q))[2];
     let html = '';
-    for (const [key, label, shown] of groups) {
-      const items = pool.filter((q) => statusOf(q) === key);
-      if (!items.length || !shown) continue;
-      if (key === 'locked') items.sort((a, b) => a.level - b.level || a.id.localeCompare(b.id, 'ru'));
-      html += `<h3 class="group ${key}">${label} <span>${items.length}</span></h3>${items.map((q) => listRow(q, showTrader)).join('')}`;
+    if (showTrader) {
+      for (const [key, label] of groups) {
+        const items = pool.filter((q) => statusOf(q) === key && shown(q));
+        if (!items.length) continue;
+        if (key === 'locked') items.sort((a, b) => a.level - b.level || a.id.localeCompare(b.id, 'ru'));
+        html += `<h3 class="group ${key}">${label} <span>${items.length}</span></h3>${items.map((q) => listRow(q, showTrader)).join('')}`;
+      }
+    } else {
+      // A trader's list is split by loyalty level, as in the game.
+      const order = groups.map(([key]) => key);
+      const leveled = LEVELED.includes(state.trader);
+      for (let n = 1; n <= 5; n++) {
+        const items = pool.filter((q) => shown(q) && (statusOf(q) === 'hidden' ? 5 : needLoyalty(q)) === n);
+        if (!items.length) continue;
+        items.sort((a, b) => order.indexOf(statusOf(a)) - order.indexOf(statusOf(b)));
+        const label = n === 5 ? 'Скрыты в игре' : leveled ? `<i class="ll">${ROMAN[n]}</i> Уровень лояльности ${n}` : 'Задания';
+        html += `<h3 class="group">${label} <span>${items.length}</span></h3>${items.map((q) => listRow(q, showTrader)).join('')}`;
+      }
     }
     if (!html && mapped) {
       html = `<div class="empty">На локации «${esc(state.map)}» здесь ничего нет.</div>`;
@@ -249,11 +314,18 @@
     return b('jump-active', 'Я сейчас на этом квесте', 'primary') + b('jump-done', 'Уже выполнен');
   }
 
-  function lockReason(q) {
+  function lockReason(q, st) {
     const missing = q.prev.filter((p) => !isDone(p));
     const parts = [];
     if (missing.length) parts.push(`сначала выполните: ${chipList(missing)}`);
+    const untaken = q.started.filter((p) => !isTaken(p));
+    if (untaken.length) parts.push(`сначала возьмите: ${chipList(untaken)}`);
     if (state.level && q.level > state.level) parts.push(`нужен ${q.level} уровень (у вас ${state.level})`);
+    if (!llOf(q.trader)) parts.push(`торговец «${esc(q.trader)}» ещё закрыт`);
+    for (const [t, n] of lowLoyalty(q)) if (llOf(t)) parts.push(`нужен ${ROMAN[n]} уровень лояльности у торговца «${esc(t)}» (у вас ${ROMAN[llOf(t)]})`);
+    if (st === 'hidden') {
+      return `<div class="lock-reason">В игре этот квест не виден, пока не выполнено условие: ${q.gates.map(esc).join('; ')}${parts.length ? `. Кроме того: ${parts.join('; ')}` : ''}. Сайт не может это отследить — когда квест появится у торговца, нажмите «Я сейчас на этом квесте».</div>`;
+    }
     return parts.length ? `<div class="lock-reason">Заблокирован — ${parts.join('; ')}</div>` : '';
   }
 
@@ -267,7 +339,7 @@
     const st = statusOf(q);
     // A quest that waits for dozens of others (the Collector) is not "opened" by each of them.
     const opens = q.next.filter((n) => byId.get(n).prev.length <= CHIP_LIMIT);
-    const stLabel = { active: 'активно!', available: 'доступно', locked: 'заблокировано', done: 'завершено' }[st];
+    const stLabel = { active: 'активно!', available: 'доступно', locked: 'заблокировано', done: 'завершено', hidden: 'скрыт в игре' }[st];
     const block = (title, html, cls = '') => (html ? `<section class="block ${cls}"><h2>${title}</h2><div class="wiki">${html}</div></section>` : '');
     el.innerHTML = `
       <div class="qhead">
@@ -285,7 +357,7 @@
         <span class="qstatus ${st}">${stLabel}</span>
       </div>
       <div class="qactions">${buttons(q, st)}</div>
-      ${st === 'locked' ? lockReason(q) : ''}
+      ${st === 'locked' || st === 'hidden' ? lockReason(q, st) : ''}
       ${keysBlock(q)}
       ${block('Цели', q.goals, 'goals')}
       ${block('Важно', q.requirements, 'req')}
@@ -319,7 +391,7 @@
   const OPTIONAL_RE = /^\(опционально\)\s*/i;
   // Goals name maps in any grammatical case ("на Развязке", "в Лесу"), often
   // without a link, so each map is matched by its stem.
-  const MAP_RES = [...new Set(DATA.quests.flatMap((q) => q.maps))].map((name) => {
+  const MAP_RES = [...new Set(quests.flatMap((q) => q.maps))].map((name) => {
     const [first, ...rest] = name.split(' ');
     const stem = first.length > 4 ? first.replace(/[аяыйе]$/, '') : first;
     return [name, new RegExp(`(?<![а-яёА-ЯЁ])${stem}[а-яё]{0,3}${rest.map((w) => ` ${w}`).join('')}(?![а-яё])`)];
@@ -342,7 +414,7 @@
   }
 
   function collectKit() {
-    const quests = DATA.quests.filter((q) => state.status[q.id] === 'active' && (onMap(q) || !q.maps.length));
+    const quests = quests.filter((q) => state.status[q.id] === 'active' && (onMap(q) || !q.maps.length));
     const kit = { quests, keys: new Map(), plant: [], use: [], gear: [] };
     for (const q of quests) {
       for (const k of q.keys) {
@@ -443,14 +515,22 @@
     render();
   }
   $('#traders').addEventListener('click', (e) => {
+    const ll = e.target.closest('[data-ll]');
+    if (ll) {
+      // I → II → III → IV → closed → I
+      state.ll[ll.dataset.ll] = (llOf(ll.dataset.ll) + 1) % 5;
+      render();
+      autosave();
+      return;
+    }
     const btn = e.target.closest('[data-trader]');
     if (btn) openTab(btn.dataset.trader);
   });
   $('#kappa-tab').addEventListener('click', () => {
     state.kappa = !state.kappa;
     // A trader without Kappa quests cannot stay open: move to the first one that has them.
-    if (state.kappa && state.trader !== ACTIVE_TAB && !DATA.quests.some((q) => q.trader === state.trader && visible(q))) {
-      const first = DATA.traders.find((t) => DATA.quests.some((q) => q.trader === t.name && visible(q)));
+    if (state.kappa && state.trader !== ACTIVE_TAB && !quests.some((q) => q.trader === state.trader && visible(q))) {
+      const first = DATA.traders.find((t) => quests.some((q) => q.trader === t.name && visible(q)));
       if (first) state.trader = first.name;
     }
     render();
@@ -497,6 +577,22 @@
     const quest = e.target.closest('[data-quest]');
     if (quest) select(quest.dataset.quest);
     if (quest || e.target.closest('[data-close]') || e.target === e.currentTarget) $('#kit').close();
+  });
+  function showMode() {
+    document.querySelectorAll('[data-mode]').forEach((b) => {
+      b.classList.toggle('current', b.dataset.mode === state.mode);
+      b.setAttribute('aria-pressed', b.dataset.mode === state.mode);
+    });
+    $('#level').value = state.level || '';
+  }
+  $('#mode').addEventListener('click', (e) => {
+    const mode = e.target.closest('[data-mode]')?.dataset.mode;
+    if (!mode || mode === state.mode) return;
+    setMode(mode);
+    showMode();
+    render();
+    autosave();
+    toast(`Режим ${MODES[mode]}: отмечено квестов — ${Object.keys(state.status).length}`);
   });
   $('#level').addEventListener('change', (e) => {
     state.level = Math.max(0, Math.min(79, parseInt(e.target.value, 10) || 0));
@@ -561,15 +657,26 @@
     return (await fileHandle.requestPermission({ mode })) === 'granted';
   }
 
-  const progressJson = () => JSON.stringify({ status: state.status, level: state.level }, null, 1);
+  const progressJson = () => JSON.stringify({ mode: state.mode, ...state.profiles, [state.mode]: { status: state.status, level: state.level, ll: state.ll } }, null, 1);
 
   function applyProgress(text) {
     const data = JSON.parse(text);
-    state.status = Object.fromEntries(Object.entries(data.status ?? {}).filter(([id, s]) => byId.has(id) && (s === 'active' || s === 'done')));
-    state.level = parseInt(data.level, 10) || 0;
-    $('#level').value = state.level || '';
+    const mode = MODES[data.mode] ? data.mode : state.mode;
+    // Older files hold one character's progress at the top level.
+    // Such a file replaces that character only; the other mode stays as it is.
+    if (data.status) {
+      setMode(mode);
+      Object.assign(state, cleanProfile(data));
+    } else {
+      state.profiles = {};
+      for (const m of Object.keys(MODES)) if (m !== mode && data[m]) state.profiles[m] = cleanProfile(data[m]);
+      Object.assign(state, cleanProfile(data[mode]), { mode });
+    }
+    useMode();
+    for (const id of Object.keys(state.status)) if (!byId.has(id)) delete state.status[id];
+    showMode();
     render();
-    toast(`Прогресс загружен: отмечено квестов — ${Object.keys(state.status).length}`);
+    toast(`Прогресс ${MODES[state.mode]} загружен: отмечено квестов — ${Object.keys(state.status).length}`);
   }
 
   async function writeProgress() {
@@ -658,7 +765,7 @@
   showFileName();
 
   $('#reset').addEventListener('click', () => {
-    if (!confirm('Сбросить весь прогресс по квестам?')) return;
+    if (!confirm(`Сбросить весь прогресс по квестам в режиме ${MODES[state.mode]}?`)) return;
     state.status = {};
     render();
     autosave();
@@ -681,7 +788,7 @@
     $('#donate').href = donateUrl;
     $('#donate').hidden = false;
   }
-  $('#level').value = state.level || '';
+  showMode();
   showToggles();
   $('#built').textContent = `Данные от ${new Date(DATA.built).toLocaleDateString('ru-RU')}.`;
   if (state.trader !== ACTIVE_TAB && !DATA.traders.some((t) => t.name === state.trader)) state.trader = DATA.traders[0].name;
