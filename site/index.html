@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Квесты Таркова — что делать и какой ключ нужен</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <nav id="traders" class="traders" aria-label="Торговцы"></nav>
+    <div class="tools">
+      <input id="search" type="search" placeholder="Поиск квеста…" autocomplete="off">
+      <label class="level">Уровень <input id="level" type="number" min="1" max="79" placeholder="—"></label>
+      <div class="tools-row">
+      <details class="menu">
+        <summary>Настройки</summary>
+        <div class="menu-body">
+          <label><input type="checkbox" data-filter="event"> Ивентовые квесты</label>
+          <label><input type="checkbox" data-filter="arena"> Квесты Arena</label>
+          <label><input type="checkbox" data-filter="seasonal"> Сезонные квесты</label>
+          <label><input type="checkbox" data-filter="historical"> Устаревшие (удалены из игры)</label>
+          <hr>
+          <button id="export" type="button">Сохранить прогресс в файл</button>
+          <button id="import" type="button">Загрузить прогресс</button>
+          <button id="reset" type="button" class="danger">Сбросить прогресс</button>
+          <input id="import-file" type="file" accept="application/json" hidden>
+        </div>
+      </details>
+      <a id="donate" class="donate" target="_blank" rel="noopener" hidden>♥ Поддержать автора</a>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+      <div class="list-filters">
+        <label><input type="checkbox" id="show-done"> Завершённые</label>
+        <label><input type="checkbox" id="show-locked"> Заблокированные</label>
+      </div>
+      <div id="list" class="list"></div>
+    </aside>
+    <section id="detail" class="detail"></section>
+  </main>
+
+  <footer class="footer">
+    Тексты и изображения — <a href="https://escapefromtarkov.fandom.com/ru/" target="_blank" rel="noopener">Escape from Tarkov Wiki</a> (CC BY-SA).
+    Неофициальный фанатский проект, не связан с Battlestate Games. <span id="built"></span>
+  </footer>
+
+  <div id="lightbox" class="lightbox" hidden><img alt=""></div>
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="config.js"></script>
+  <script src="data/quests.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
