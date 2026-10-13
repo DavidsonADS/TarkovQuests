@@ -13,6 +13,7 @@ const KEY_RE = /(^|[\s«"(])(ключ|ключ-карта|ключи)([\s,.)»"-
 const NOT_KEY_RE = /[,.]|\(ключ|^ключ на |разводной|шарнирный|трещоточный|шифрования/i;
 // A key the quest asks to hand over is a goal, not something to unlock with.
 const isKey = (k) => KEY_RE.test(k.name) && !NOT_KEY_RE.test(k.name) && !/для передачи/i.test(k.condition ?? '');
+const COLLECTOR = 'Коллекционер';
 
 // ---------- wikitext infobox ----------
 
@@ -208,6 +209,10 @@ for (const [title, m] of meta) {
   for (const p of m.prev.map(resolve)) if (p && p !== title) prereqs.get(title).add(p);
   for (const n of m.next.map(resolve)) if (n && n !== title) prereqs.get(n).add(title);
 }
+// The Collector opens only after every Kappa quest; the wiki infobox lists none.
+if (prereqs.has(COLLECTOR)) {
+  for (const [title, m] of meta) if (m.kappa && !m.historical && title !== COLLECTOR) prereqs.get(COLLECTOR).add(title);
+}
 const unlocks = new Map(titles.map((t) => [t, []]));
 for (const [title, set] of prereqs) for (const p of set) unlocks.get(p).push(title);
 
@@ -216,7 +221,9 @@ const quests = [];
 await pool(titles, 4, async (title) => {
   const m = meta.get(title);
   const page = parsePage(await parsedHtml(title), questTitles, redirectMap);
-  const levelText = cheerio.load(page.requirements).text().match(/(\d+)[\s-]*(?:го\s+)?уров/i);
+  // Same-line match only: "…лояльности: 4\nУровень персонажа: 40" is not level 4.
+  const reqText = cheerio.load(page.requirements).text();
+  const levelText = reqText.match(/уровень персонажа:?\s*(\d+)/i) ?? reqText.match(/(\d+)[ \t-]*(?:го\s+)?уров/i);
   quests.push({
     id: title,
     trader: m.trader || 'Прочее',

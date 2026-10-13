@@ -216,6 +216,14 @@
     return `<button class="chip ${statusOf(q)}" data-quest="${esc(id)}">${esc(id)} <small>${esc(q.trader)}</small></button>`;
   };
 
+  // The Collector depends on every Kappa quest, so long lists are cut short.
+  const CHIP_LIMIT = 12;
+  function chipList(ids) {
+    const rest = ids.length - CHIP_LIMIT;
+    const more = rest > 0 ? ` <span class="muted">и ещё ${rest} — все они видны с фильтром «Каппа»</span>` : '';
+    return ids.slice(0, CHIP_LIMIT).map(chip).join(' ') + more;
+  }
+
   function keysBlock(q) {
     if (!q.keys.length) return '';
     return `
@@ -244,7 +252,7 @@
   function lockReason(q) {
     const missing = q.prev.filter((p) => !isDone(p));
     const parts = [];
-    if (missing.length) parts.push(`сначала выполните: ${missing.map(chip).join(' ')}`);
+    if (missing.length) parts.push(`сначала выполните: ${chipList(missing)}`);
     if (state.level && q.level > state.level) parts.push(`нужен ${q.level} уровень (у вас ${state.level})`);
     return parts.length ? `<div class="lock-reason">Заблокирован — ${parts.join('; ')}</div>` : '';
   }
@@ -257,6 +265,8 @@
       return;
     }
     const st = statusOf(q);
+    // A quest that waits for dozens of others (the Collector) is not "opened" by each of them.
+    const opens = q.next.filter((n) => byId.get(n).prev.length <= CHIP_LIMIT);
     const stLabel = { active: 'активно!', available: 'доступно', locked: 'заблокировано', done: 'завершено' }[st];
     const block = (title, html, cls = '') => (html ? `<section class="block ${cls}"><h2>${title}</h2><div class="wiki">${html}</div></section>` : '');
     el.innerHTML = `
@@ -283,8 +293,8 @@
         ? block('Как выполнить', q.guide, 'guide')
         : `<section class="block guide"><h2>Как выполнить</h2><p class="muted">На вики пока нет описания прохождения этого квеста. <a href="${esc(q.wiki)}" target="_blank" rel="noopener">Открыть страницу квеста</a></p></section>`}
       ${block('Награда', q.rewards, 'rewards')}
-      ${q.prev.length ? `<section class="block"><h2>Предыдущие квесты</h2><div class="chips">${q.prev.map(chip).join('')}</div></section>` : ''}
-      ${q.next.length ? `<section class="block"><h2>Открывает квесты</h2><div class="chips">${q.next.map(chip).join('')}</div></section>` : ''}
+      ${q.prev.length ? `<section class="block"><h2>Предыдущие квесты</h2><div class="chips">${chipList([...q.prev.filter((p) => !isDone(p)), ...q.prev.filter(isDone)])}</div></section>` : ''}
+      ${opens.length ? `<section class="block"><h2>Открывает квесты</h2><div class="chips">${opens.map(chip).join('')}</div></section>` : ''}
       ${q.description || q.image ? `
         <details class="block story">
           <summary>Что говорит торговец</summary>
