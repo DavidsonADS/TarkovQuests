@@ -4,36 +4,31 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Квесты Таркова — что делать и какой ключ нужен</title>
-  <link rel="stylesheet" href="style.css?v=11">
+  <link rel="stylesheet" href="style.css?v=22">
 </head>
 <body>
   <header class="topbar">
     <nav id="traders" class="traders" aria-label="Торговцы"></nav>
     <div class="tools">
-      <div class="tools-row">
-        <label class="level">Уровень <input id="level" type="number" min="1" max="79" placeholder="—"></label>
-        <span class="progress-btns">
-          <button id="save" type="button">Сохранить</button>
-          <button id="load" type="button">Загрузить</button>
-        </span>
-      </div>
-      <input id="import-file" type="file" accept="application/json" hidden>
-      <div class="tools-row">
+      <label class="tool level" title="Ваш уровень в игре: квесты выше него считаются заблокированными">Уровень <input id="level" type="number" min="1" max="79" placeholder="—"></label>
+      <button id="save" class="tool" type="button">Сохранить</button>
+      <button id="kappa-tab" class="tool kappa-tab" type="button"><span>Каппа</span><span class="kcount"></span></button>
+      <button id="load" class="tool" type="button">Загрузить</button>
       <details class="menu">
-        <summary>Настройки</summary>
+        <summary class="tool">⚙ Настройки</summary>
         <div class="menu-body">
           <label><input type="checkbox" data-filter="event"> Ивентовые квесты</label>
           <label><input type="checkbox" data-filter="arena"> Квесты Arena</label>
           <label><input type="checkbox" data-filter="seasonal"> Сезонные квесты</label>
           <label><input type="checkbox" data-filter="historical"> Устаревшие (удалены из игры)</label>
           <hr>
+          <label id="autosave-label" title="Записывать прогресс в выбранный файл после каждого действия с квестами"><input type="checkbox" id="autosave"> Автосохранение в файл</label>
           <button id="forget-file" type="button" hidden>Сменить файл прогресса</button>
           <button id="reset" type="button" class="danger">Сбросить прогресс</button>
         </div>
       </details>
-      <label id="autosave-label" class="autosave" title="Записывать прогресс в выбранный файл после каждого действия с квестами"><input type="checkbox" id="autosave"> Автосохранение</label>
-      <a id="donate" class="donate" target="_blank" rel="noopener" hidden>♥ Поддержать автора</a>
-      </div>
+      <a id="donate" class="tool donate" target="_blank" rel="noopener" hidden>♥ Поддержать автора</a>
+      <input id="import-file" type="file" accept="application/json" hidden>
     </div>
   </header>
 
@@ -62,8 +57,8 @@
   <div id="lightbox" class="lightbox" hidden><img alt=""></div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="config.js?v=11"></script>
-  <script src="data/quests.js?v=11"></script>
-  <script src="app.js?v=11"></script>
+  <script src="config.js?v=22"></script>
+  <script src="data/quests.js?v=22"></script>
+  <script src="app.js?v=22"></script>
 </body>
 </html>

@@ -19,7 +19,7 @@
 
   // ---------- state ----------
 
-  const defaults = { status: {}, level: 0, filters: {}, v: 2, autosave: true, trader: DATA.traders[0].name, map: '', selected: null, showDone: false, showLocked: false };
+  const defaults = { status: {}, level: 0, filters: {}, v: 2, autosave: true, trader: DATA.traders[0].name, map: '', selected: null, showDone: false, showLocked: false, kappa: false };
   let state = load();
 
   function load() {
@@ -49,7 +49,8 @@
     return 'available';
   }
 
-  const visible = (q) => q.flags.every((f) => (HIDDEN_BY_DEFAULT.includes(f) ? state.filters[f] : true));
+  const inCategory = (q) => q.flags.every((f) => (HIDDEN_BY_DEFAULT.includes(f) ? state.filters[f] : true));
+  const visible = (q) => (!state.kappa || q.kappa) && inCategory(q);
 
   function ancestors(id, acc = new Set()) {
     for (const p of byId.get(id).prev) {
@@ -110,14 +111,25 @@
         <span class="portrait all">★</span><span class="tname">Активные</span>
         <span class="tcount">${active || '—'}</span>
       </button>`];
+    const kappa = DATA.quests.filter((q) => q.kappa && inCategory(q));
+    const kappaDone = kappa.filter((q) => isDone(q.id)).length;
+    const kappaTab = $('#kappa-tab');
+    kappaTab.classList.toggle('current', state.kappa);
+    kappaTab.setAttribute('aria-pressed', state.kappa);
+    kappaTab.title = `Показывать только квесты, нужные для Каппы. Выполнено ${kappaDone} из ${kappa.length}`;
+    kappaTab.querySelector('.kcount').textContent = `${kappaDone}/${kappa.length}`;
+    kappaTab.style.setProperty('--done', `${kappa.length ? (kappaDone / kappa.length) * 100 : 0}%`);
     for (const t of DATA.traders) {
-      const qs = DATA.quests.filter((q) => q.trader === t.name && visible(q));
-      if (!qs.length) continue;
+      const all = DATA.quests.filter((q) => q.trader === t.name && inCategory(q));
+      if (!all.length && state.trader !== t.name) continue;
+      // With the Kappa filter on, traders without Kappa quests stay in place but cannot be opened.
+      const qs = all.filter(visible);
+      const off = state.kappa && !qs.length;
       const act = qs.filter((q) => statusOf(q) === 'active').length;
       const avail = qs.filter((q) => statusOf(q) === 'available').length;
       const done = qs.filter((q) => statusOf(q) === 'done').length;
       tiles.push(`
-        <button class="trader ${state.trader === t.name ? 'current' : ''}" data-trader="${esc(t.name)}" title="Выполнено ${done} из ${qs.length}">
+        <button class="trader ${state.trader === t.name ? 'current' : ''}" data-trader="${esc(t.name)}" title="${off ? 'Нет квестов для Каппы' : `Выполнено ${done} из ${qs.length}`}" ${off ? 'disabled' : ''}>
           ${t.image ? `<img class="portrait" src="${esc(t.image)}" alt="">` : `<span class="portrait all">${esc(t.name[0])}</span>`}
           <span class="tname">${esc(t.name)}</span>
           <span class="tcount">${act ? `<b class="act">${act}</b>` : ''}${avail ? `<b class="avail">${avail}</b>` : ''}${!act && !avail ? '—' : ''}</span>
@@ -156,12 +168,14 @@
     const query = $('#search').value.trim().toLowerCase();
     let pool = DATA.quests.filter(visible);
     let showTrader = false;
+    const noKappa = state.kappa && !pool.some((q) => q.trader === state.trader);
     if (query) {
       // Search ignores the category filters so hidden event quests are still findable.
       pool = DATA.quests.filter((q) => q.id.toLowerCase().includes(query));
       showTrader = true;
     } else if (state.trader === ACTIVE_TAB) {
-      pool = pool.filter((q) => statusOf(q) === 'active');
+      // Every active quest is listed, like the counter on the tab: filters do not hide them.
+      pool = DATA.quests.filter((q) => statusOf(q) === 'active');
       showTrader = true;
     } else {
       pool = pool.filter((q) => q.trader === state.trader);
@@ -188,7 +202,8 @@
     } else if (!html) {
       html = state.trader === ACTIVE_TAB && !query
         ? '<div class="empty">Нет активных квестов. Выберите торговца и нажмите «Принять» на квесте.</div>'
-        : '<div class="empty">Здесь пусто. Включите «Заблокированные» или «Завершённые» выше.</div>';
+        : noKappa && !query ? '<div class="empty">У этого торговца нет квестов для Каппы. Выключите фильтр «Каппа», чтобы увидеть его квесты.</div>'
+        : `<div class="empty">Здесь пусто. Включите «Заблокированные» или «Завершённые» выше${state.kappa ? ' либо выключите фильтр «Каппа»' : ''}.</div>`;
     }
     if (anywhere.length) {
       html += `<h3 class="group">Без привязки к локации <span>${anywhere.length}</span></h3>${anywhere.map((q) => listRow(q, showTrader)).join('')}`;
@@ -412,13 +427,25 @@
 
   // ---------- events ----------
 
-  $('#traders').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-trader]');
-    if (!btn) return;
-    state.trader = btn.dataset.trader;
+  function openTab(trader) {
+    state.trader = trader;
     $('#search').value = '';
     render();
+  }
+  $('#traders').addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-trader]');
+    if (btn) openTab(btn.dataset.trader);
   });
+  $('#kappa-tab').addEventListener('click', () => {
+    state.kappa = !state.kappa;
+    // A trader without Kappa quests cannot stay open: move to the first one that has them.
+    if (state.kappa && state.trader !== ACTIVE_TAB && !DATA.quests.some((q) => q.trader === state.trader && visible(q))) {
+      const first = DATA.traders.find((t) => DATA.quests.some((q) => q.trader === t.name && visible(q)));
+      if (first) state.trader = first.name;
+    }
+    render();
+  });
+  document.addEventListener('click', (e) => { if (!e.target.closest('.menu')) $('.menu').open = false; });
 
   $('#list').addEventListener('click', (e) => {
     const row = e.target.closest('[data-quest]');
@@ -447,7 +474,11 @@
   });
 
   $('#lightbox').addEventListener('click', () => { $('#lightbox').hidden = true; });
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#lightbox').hidden = true; });
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    $('#lightbox').hidden = true;
+    $('.menu').open = false;
+  });
 
   $('#search').addEventListener('input', renderList);
   $('#map').addEventListener('change', (e) => { state.map = e.target.value; render(); });
