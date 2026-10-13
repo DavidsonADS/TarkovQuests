@@ -292,7 +292,19 @@
   const KIT_KEY_RE = /^ключ|карта доступа|keycard/i;
   const KIT_FOUND_RE = /подбираем|для передачи/i;
   const OPTIONAL_RE = /^\(опционально\)\s*/i;
-  const mapNames = new Set(DATA.quests.flatMap((q) => q.maps));
+  // Goals name maps in any grammatical case ("на Развязке", "в Лесу"), often
+  // without a link, so each map is matched by its stem.
+  const MAP_RES = [...new Set(DATA.quests.flatMap((q) => q.maps))].map((name) => {
+    const [first, ...rest] = name.split(' ');
+    const stem = first.length > 4 ? first.replace(/[аяыйе]$/, '') : first;
+    return [name, new RegExp(`(?<![а-яёА-ЯЁ])${stem}[а-яё]{0,3}${rest.map((w) => ` ${w}`).join('')}(?![а-яё])`)];
+  });
+
+  function lineMaps(text) {
+    // "на локации X" is the place of the goal; other map names may be landmarks.
+    const explicit = text.split(/на локаци(?:и|ях)\s+/)[1];
+    return MAP_RES.filter(([, re]) => re.test(explicit ?? text)).map(([name]) => name);
+  }
 
   function goalLines(q) {
     const doc = new DOMParser().parseFromString(q.goals, 'text/html');
@@ -300,8 +312,7 @@
       const own = li.cloneNode(true);
       own.querySelectorAll('ul, ol').forEach((n) => n.remove());
       const text = own.textContent.replace(/\s+/g, ' ').trim();
-      const maps = [...own.querySelectorAll('a[title]')].map((a) => a.title).filter((t) => mapNames.has(t));
-      return { text, body: text.replace(OPTIONAL_RE, ''), maps, optional: OPTIONAL_RE.test(text) };
+      return { text, body: text.replace(OPTIONAL_RE, ''), maps: lineMaps(text), optional: OPTIONAL_RE.test(text) };
     });
   }
 
