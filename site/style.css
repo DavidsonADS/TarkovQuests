@@ -67,13 +67,13 @@ button { cursor: pointer; }
 .tcount .avail { background: var(--green); }
 
 .tools { display: flex; flex-direction: column; gap: 6px; justify-content: center; width: 410px; flex: 0 0 auto; }
-.tools input[type="search"], .level input {
+#search, .level input {
   background: #0a0a09;
   border: 1px solid var(--line);
   border-radius: 3px;
   padding: 5px 8px;
 }
-.tools input[type="search"] { width: 100%; }
+#search { width: 100%; }
 .level { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
 .level input { width: 56px; }
 .progress-btns { display: flex; gap: 6px; flex: 0 0 190px; }
@@ -128,6 +128,7 @@ button { cursor: pointer; }
 
 .sidebar { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); }
 .list-filters { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+.list-search { padding: 8px 14px; border-bottom: 1px solid var(--line); }
 .list-filters .act-btn {
   flex: 1 1 auto;
   min-width: 0;

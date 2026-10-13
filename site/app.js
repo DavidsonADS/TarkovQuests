@@ -61,6 +61,20 @@
     return acc;
   }
 
+  // Quests the player has in progress keep their status: the wiki chain is not
+  // always strict, so a "previous" quest can still be active in the game.
+  function finishAncestors(id) {
+    const anc = [...ancestors(id)].filter((a) => !state.status[a]);
+    anc.forEach((a) => { state.status[a] = 'done'; });
+    return anc;
+  }
+
+  function finishedToast(ids) {
+    if (!ids.length) return;
+    const shown = ids.slice(0, 12).join(', ');
+    toast(`Отмечены выполненными (${ids.length}): ${shown}${ids.length > 12 ? ` и ещё ${ids.length - 12}` : ''}`);
+  }
+
   // ---------- actions ----------
 
   function complete(id) {
@@ -76,16 +90,14 @@
     reopen: (id) => { delete state.status[id]; },
     cancel: (id) => { delete state.status[id]; },
     'jump-active': (id) => {
-      const anc = ancestors(id);
-      anc.forEach((a) => { state.status[a] = 'done'; });
+      const anc = finishAncestors(id);
       state.status[id] = 'active';
-      toast(`Отмечено выполненными предыдущих квестов: ${anc.size}`);
+      finishedToast(anc);
     },
     'jump-done': (id) => {
-      const anc = ancestors(id);
-      anc.forEach((a) => { state.status[a] = 'done'; });
+      const anc = finishAncestors(id);
       state.status[id] = 'done';
-      toast(`Отмечено выполненными квестов: ${anc.size + 1}`);
+      finishedToast([...anc, id]);
     },
   };
 
@@ -129,7 +141,8 @@
     let pool = DATA.quests.filter(visible);
     let showTrader = false;
     if (query) {
-      pool = pool.filter((q) => q.id.toLowerCase().includes(query));
+      // Search ignores the category filters so hidden event quests are still findable.
+      pool = DATA.quests.filter((q) => q.id.toLowerCase().includes(query));
       showTrader = true;
     } else if (state.trader === ACTIVE_TAB) {
       pool = pool.filter((q) => statusOf(q) === 'active');
@@ -184,7 +197,7 @@
     const b = (action, label, cls = '') => `<button class="act-btn ${cls}" data-action="${action}">${label}</button>`;
     if (st === 'available') return b('accept', 'Принять', 'primary') + b('jump-done', 'Уже выполнен');
     if (st === 'active') return b('complete', 'Завершить', 'primary') + b('cancel', 'Отменить');
-    if (st === 'done') return b('reopen', 'Вернуть в невыполненные');
+    if (st === 'done') return b('accept', 'Он у меня активен', 'primary') + b('reopen', 'Вернуть в невыполненные');
     return b('jump-active', 'Я сейчас на этом квесте', 'primary') + b('jump-done', 'Уже выполнен');
   }
 
