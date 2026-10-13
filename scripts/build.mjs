@@ -1,9 +1,11 @@
-// Builds site/data/quests.js from the Russian EFT wiki.
+// Builds site/data/quests.js from the Russian EFT wiki; unlock conditions are
+// corrected with tarkov.dev where it has them.
 // Usage: node scripts/build.mjs   (delete .cache/ to force a fresh download)
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as cheerio from 'cheerio';
 import { WIKI, categoryMembers, wikitexts, parsedHtml, redirects, pool } from './wiki.mjs';
+import { gameTasks, taskKey } from './tarkovdev.mjs';
 
 const OUT = path.resolve(import.meta.dirname, '..', 'site', 'data', 'quests.js');
 const TRADER_ORDER = ['Прапор', 'Терапевт', 'Скупщик', 'Лыжник', 'Миротворец', 'Механик', 'Барахольщик', 'Егерь', 'Реф', 'Смотритель', 'Водитель БТР'];
@@ -205,9 +207,55 @@ const unresolved = [...unknownLinks].filter((l) => !resolve(l));
 console.log(`  Unresolved quest links (${unresolved.length}): ${unresolved.slice(0, 40).join(' | ')}`);
 
 const prereqs = new Map(titles.map((t) => [t, new Set()]));
+// Links the later quest names itself; a link known only from the "next" field
+// of the earlier page is weaker and is the first to go when chains loop.
+const confirmed = new Map(titles.map((t) => [t, new Set()]));
 for (const [title, m] of meta) {
-  for (const p of m.prev.map(resolve)) if (p && p !== title) prereqs.get(title).add(p);
+  for (const p of m.prev.map(resolve)) if (p && p !== title) { prereqs.get(title).add(p); confirmed.get(title).add(p); }
   for (const n of m.next.map(resolve)) if (n && n !== title) prereqs.get(n).add(title);
+}
+
+// The game files know better than the wiki which quests a quest waits for.
+console.log('Fetching unlock conditions from tarkov.dev…');
+const game = await gameTasks();
+const titleByKey = new Map(titles.filter((t) => !meta.get(t).historical).map((t) => [taskKey(t), t]));
+const gameOf = (title) => (meta.get(title).historical ? undefined : game.get(taskKey(title)));
+// A quest that must only be taken or failed opens together with it.
+function gamePrereqs(key, seen = new Set()) {
+  const out = new Set();
+  if (seen.has(key)) return out;
+  seen.add(key);
+  for (const r of game.get(key)?.requires ?? []) {
+    if (r.done) { if (titleByKey.has(r.key)) out.add(titleByKey.get(r.key)); } else for (const p of gamePrereqs(r.key, seen)) out.add(p);
+  }
+  return out;
+}
+const sourced = { game: 0, cleared: 0, counter: 0, wiki: 0 };
+for (const title of titles) {
+  const g = gameOf(title);
+  if (!g) sourced.wiki++;
+  else if (g.counter && !g.requires.length) sourced.counter++;
+  else {
+    if (g.requires.length) sourced.game++; else if (prereqs.get(title).size) sourced.cleared++;
+    prereqs.set(title, gamePrereqs(taskKey(title)));
+    confirmed.set(title, new Set(prereqs.get(title)));
+  }
+}
+console.log(`  from tarkov.dev: ${sourced.game}, wiki links dropped: ${sourced.cleared}, opened by a counter (wiki kept): ${sourced.counter}, not in tarkov.dev (wiki kept): ${sourced.wiki}`);
+
+// A loop locks its quests for good. Drop the weakest link: one the later quest
+// does not name, into a quest that lists other prerequisites itself.
+function loopLink() {
+  const reach = (from, to, seen = new Set()) => from === to || (!seen.has(from) && seen.add(from) && [...prereqs.get(from)].some((p) => reach(p, to, seen)));
+  const links = [];
+  for (const [title, set] of prereqs) for (const p of set) if (reach(p, title)) links.push([p, title]);
+  if (!links.length) return null;
+  const weak = links.filter(([p, title]) => !confirmed.get(title).has(p));
+  return weak.find(([, title]) => confirmed.get(title).size) ?? weak[0] ?? links[0];
+}
+for (let link; (link = loopLink());) {
+  console.log(`  loop broken: «${link[0]}» is no longer required for «${link[1]}»`);
+  prereqs.get(link[1]).delete(link[0]);
 }
 // The Collector opens only after every Kappa quest; the wiki infobox lists none.
 if (prereqs.has(COLLECTOR)) {
@@ -229,7 +277,7 @@ await pool(titles, 4, async (title) => {
     trader: m.trader || 'Прочее',
     maps: m.maps.filter((x) => x && !/^(любая|нет|-)$/i.test(x)),
     type: m.type,
-    level: m.level || (levelText ? parseInt(levelText[1], 10) : 0),
+    level: gameOf(title)?.level || m.level || (levelText ? parseInt(levelText[1], 10) : 0),
     kappa: m.kappa,
     flags: [
       (flagSets.event.has(title) || m.eventTpl) && 'event',
