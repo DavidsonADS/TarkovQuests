@@ -19,7 +19,7 @@
 
   // ---------- state ----------
 
-  const defaults = { status: {}, level: 0, filters: {}, v: 2, trader: DATA.traders[0].name, selected: null, showDone: false, showLocked: false };
+  const defaults = { status: {}, level: 0, filters: {}, v: 2, autosave: true, trader: DATA.traders[0].name, selected: null, showDone: false, showLocked: false };
   let state = load();
 
   function load() {
@@ -296,6 +296,7 @@
     if (action) {
       actions[action.dataset.action](state.selected);
       render();
+      autosave();
       return;
     }
     const quest = e.target.closest('[data-quest]');
@@ -318,6 +319,7 @@
   $('#level').addEventListener('change', (e) => {
     state.level = Math.max(0, Math.min(79, parseInt(e.target.value, 10) || 0));
     render();
+    autosave();
   });
   $('#show-done').addEventListener('change', (e) => { state.showDone = e.target.checked; render(); });
   $('#show-locked').addEventListener('change', (e) => { state.showLocked = e.target.checked; render(); });
@@ -326,34 +328,150 @@
     cb.addEventListener('change', () => { state.filters[cb.dataset.filter] = cb.checked; render(); });
   });
 
-  $('#export').addEventListener('click', () => {
-    const blob = new Blob([JSON.stringify({ status: state.status, level: state.level }, null, 1)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'tarkov-quests-progress.json';
-    a.click();
-    URL.revokeObjectURL(a.href);
+  // ---------- progress file ----------
+  // Chromium browsers can remember the chosen file, so after the first pick
+  // saving and loading take one click. Others fall back to download/upload.
+
+  const FILE_NAME = 'tarkov-quests-progress.json';
+  const FILE_TYPES = [{ description: 'Прогресс квестов', accept: { 'application/json': ['.json'] } }];
+  const canPickFiles = 'showSaveFilePicker' in window;
+  let fileHandle = null;
+
+  function handleStore(mode, fn) {
+    return new Promise((resolve, reject) => {
+      const open = indexedDB.open('tq', 1);
+      open.onupgradeneeded = () => open.result.createObjectStore('kv');
+      open.onerror = () => reject(open.error);
+      open.onsuccess = () => {
+        const tx = open.result.transaction('kv', mode);
+        const req = fn(tx.objectStore('kv'));
+        tx.oncomplete = () => resolve(req?.result);
+        tx.onerror = () => reject(tx.error);
+      };
+    });
+  }
+
+  async function rememberFile(handle) {
+    fileHandle = handle;
+    try {
+      await handleStore('readwrite', (s) => (handle ? s.put(handle, 'progressFile') : s.delete('progressFile')));
+    } catch {}
+    showFileName();
+  }
+
+  function showFileName() {
+    const name = fileHandle?.name;
+    $('#save').title = name ? `Сохранить прогресс в файл ${name}` : 'Сохранить прогресс в файл';
+    $('#load').title = name ? `Загрузить прогресс из файла ${name}` : 'Загрузить прогресс из файла';
+    $('#forget-file').hidden = !name;
+  }
+
+  async function allowed(mode) {
+    if ((await fileHandle.queryPermission({ mode })) === 'granted') return true;
+    return (await fileHandle.requestPermission({ mode })) === 'granted';
+  }
+
+  const progressJson = () => JSON.stringify({ status: state.status, level: state.level }, null, 1);
+
+  function applyProgress(text) {
+    const data = JSON.parse(text);
+    state.status = Object.fromEntries(Object.entries(data.status ?? {}).filter(([id, s]) => byId.has(id) && (s === 'active' || s === 'done')));
+    state.level = parseInt(data.level, 10) || 0;
+    $('#level').value = state.level || '';
+    render();
+    toast(`Прогресс загружен: отмечено квестов — ${Object.keys(state.status).length}`);
+  }
+
+  async function writeProgress() {
+    if (!(await allowed('readwrite'))) return false;
+    const out = await fileHandle.createWritable();
+    await out.write(progressJson());
+    await out.close();
+    return true;
+  }
+
+  // Writes are chained so quick successive clicks never overlap on the file.
+  let writeQueue = Promise.resolve();
+  function autosave() {
+    if (!state.autosave || !fileHandle) return;
+    writeQueue = writeQueue.then(async () => {
+      try {
+        if (!(await writeProgress())) throw new Error('denied');
+        $('#save').classList.add('saved');
+        setTimeout(() => $('#save').classList.remove('saved'), 1200);
+      } catch {
+        toast('Автосохранение не удалось. Нажмите «Сохранить», чтобы записать прогресс вручную.');
+      }
+    });
+  }
+
+  async function saveProgress() {
+    if (!canPickFiles) {
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(new Blob([progressJson()], { type: 'application/json' }));
+      a.download = FILE_NAME;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      return;
+    }
+    try {
+      if (!fileHandle) await rememberFile(await window.showSaveFilePicker({ suggestedName: FILE_NAME, types: FILE_TYPES }));
+      if (!(await writeProgress())) return toast('Нет разрешения на запись в файл');
+      toast(`Сохранено в ${fileHandle.name}`);
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      await rememberFile(null);
+      toast('Не удалось сохранить. Нажмите ещё раз и выберите файл заново.');
+    }
+  }
+
+  async function loadProgress() {
+    if (!canPickFiles) return $('#import-file').click();
+    try {
+      if (!fileHandle) await rememberFile((await window.showOpenFilePicker({ types: FILE_TYPES }))[0]);
+      if (!(await allowed('read'))) return toast('Нет разрешения на чтение файла');
+      applyProgress(await (await fileHandle.getFile()).text());
+    } catch (e) {
+      if (e.name === 'AbortError') return;
+      if (e.name === 'NotFoundError') await rememberFile(null);
+      toast(e.name === 'NotFoundError' ? 'Файл не найден. Нажмите ещё раз и выберите его заново.' : 'Не удалось прочитать файл');
+    }
+  }
+
+  $('#save').addEventListener('click', saveProgress);
+  $('#load').addEventListener('click', loadProgress);
+  $('#forget-file').addEventListener('click', async () => {
+    await rememberFile(null);
+    toast('Файл забыт. При следующем сохранении или загрузке выберите новый.');
   });
-  $('#import').addEventListener('click', () => $('#import-file').click());
   $('#import-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     try {
-      const data = JSON.parse(await file.text());
-      state.status = Object.fromEntries(Object.entries(data.status ?? {}).filter(([id, s]) => byId.has(id) && (s === 'active' || s === 'done')));
-      state.level = parseInt(data.level, 10) || 0;
-      $('#level').value = state.level || '';
-      render();
-      toast('Прогресс загружен');
+      applyProgress(await file.text());
     } catch {
       toast('Не удалось прочитать файл');
     }
     e.target.value = '';
   });
+  $('#autosave').checked = state.autosave;
+  $('#autosave').addEventListener('change', (e) => {
+    state.autosave = e.target.checked;
+    save();
+    if (state.autosave && !fileHandle) toast('Автосохранение включится после выбора файла: нажмите «Сохранить».');
+    autosave();
+  });
+  $('#autosave-label').hidden = !canPickFiles;
+  if (canPickFiles) {
+    handleStore('readonly', (s) => s.get('progressFile')).then((h) => { fileHandle = h ?? null; showFileName(); }).catch(() => {});
+  }
+  showFileName();
+
   $('#reset').addEventListener('click', () => {
     if (!confirm('Сбросить весь прогресс по квестам?')) return;
     state.status = {};
     render();
+    autosave();
   });
 
   function fromHash() {

@@ -66,7 +66,7 @@ button { cursor: pointer; }
 .tcount .act { background: var(--gold); }
 .tcount .avail { background: var(--green); }
 
-.tools { display: flex; flex-direction: column; gap: 6px; justify-content: center; width: 230px; flex: 0 0 auto; }
+.tools { display: flex; flex-direction: column; gap: 6px; justify-content: center; width: 410px; flex: 0 0 auto; }
 .tools input[type="search"], .level input {
   background: #0a0a09;
   border: 1px solid var(--line);
@@ -75,12 +75,22 @@ button { cursor: pointer; }
 }
 .tools input[type="search"] { width: 100%; }
 .level { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); }
-.level input { width: 64px; }
+.level input { width: 56px; }
+.progress-btns { display: flex; gap: 6px; flex: 0 0 190px; }
+.progress-btns button { flex: 1; padding: 4px 10px; line-height: 1.5; font-size: 13px; background: var(--panel-2); border: 1px solid #45463f; border-radius: 3px; }
+.progress-btns button:hover { border-color: #8a8975; }
+.progress-btns button.saved { border-color: var(--green); color: var(--green); }
+.autosave { font-size: 13px; color: var(--muted); white-space: nowrap; }
+.autosave[hidden] { display: none; }
 
 .tools-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .donate {
-  padding: 3px 10px;
+  flex: 0 0 190px;
+  padding: 4px 10px;
+  border: 1px solid var(--gold);
+  text-align: center;
   font-size: 13px;
+  line-height: 1.5;
   color: #14140f;
   background: var(--gold);
   border-radius: 3px;
@@ -109,6 +119,7 @@ button { cursor: pointer; }
 .menu-body hr { width: 100%; border: 0; border-top: 1px solid var(--line); }
 .menu-body button { background: #2a2b27; border: 1px solid var(--line); border-radius: 3px; padding: 5px 8px; }
 .menu-body button:hover { border-color: #666; }
+.menu-body button[hidden] { display: none; }
 .menu-body .danger { color: #e58d7b; }
 
 /* ---------- layout ---------- */

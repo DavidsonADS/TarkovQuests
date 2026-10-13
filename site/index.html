@@ -11,7 +11,14 @@
     <nav id="traders" class="traders" aria-label="Торговцы"></nav>
     <div class="tools">
       <input id="search" type="search" placeholder="Поиск квеста…" autocomplete="off">
-      <label class="level">Уровень <input id="level" type="number" min="1" max="79" placeholder="—"></label>
+      <div class="tools-row">
+        <label class="level">Уровень <input id="level" type="number" min="1" max="79" placeholder="—"></label>
+        <span class="progress-btns">
+          <button id="save" type="button">Сохранить</button>
+          <button id="load" type="button">Загрузить</button>
+        </span>
+      </div>
+      <input id="import-file" type="file" accept="application/json" hidden>
       <div class="tools-row">
       <details class="menu">
         <summary>Настройки</summary>
@@ -21,12 +28,11 @@
           <label><input type="checkbox" data-filter="seasonal"> Сезонные квесты</label>
           <label><input type="checkbox" data-filter="historical"> Устаревшие (удалены из игры)</label>
           <hr>
-          <button id="export" type="button">Сохранить прогресс в файл</button>
-          <button id="import" type="button">Загрузить прогресс</button>
+          <button id="forget-file" type="button" hidden>Сменить файл прогресса</button>
           <button id="reset" type="button" class="danger">Сбросить прогресс</button>
-          <input id="import-file" type="file" accept="application/json" hidden>
         </div>
       </details>
+      <label id="autosave-label" class="autosave" title="Записывать прогресс в выбранный файл после каждого действия с квестами"><input type="checkbox" id="autosave"> Автосохранение</label>
       <a id="donate" class="donate" target="_blank" rel="noopener" hidden>♥ Поддержать автора</a>
       </div>
     </div>
