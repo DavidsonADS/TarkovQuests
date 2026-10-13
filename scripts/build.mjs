@@ -1,11 +1,12 @@
 // Builds site/data/quests.js from the Russian EFT wiki; unlock conditions are
-// corrected with tarkov.dev where it has them.
+// corrected with tarkov.dev where it has them. Pictures are copied to site/img.
 // Usage: node scripts/build.mjs   (delete .cache/ to force a fresh download)
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as cheerio from 'cheerio';
 import { WIKI, categoryMembers, wikitexts, parsedHtml, redirects, pool } from './wiki.mjs';
 import { MODES, gameTasks, taskKey } from './tarkovdev.mjs';
+import { mirrorImages } from './images.mjs';
 
 const OUT = path.resolve(import.meta.dirname, '..', 'site', 'data', 'quests.js');
 const TRADER_ORDER = ['Прапор', 'Терапевт', 'Скупщик', 'Лыжник', 'Миротворец', 'Механик', 'Барахольщик', 'Егерь', 'Реф', 'Смотритель', 'Водитель БТР'];
@@ -359,6 +360,8 @@ for (const name of traderNames) {
 }
 
 const data = { built: new Date().toISOString(), source: WIKI, traders, quests };
+console.log('Copying images…');
+await mirrorImages(data);
 await writeFile(OUT, `window.TQ_DATA = ${JSON.stringify(data)};\n`);
 
 const stat = (f) => quests.filter(f).length;

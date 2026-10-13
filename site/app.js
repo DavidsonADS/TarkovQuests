@@ -431,9 +431,9 @@
   }
 
   function collectKit() {
-    const quests = quests.filter((q) => state.status[q.id] === 'active' && (onMap(q) || !q.maps.length));
-    const kit = { quests, keys: new Map(), plant: [], use: [], gear: [] };
-    for (const q of quests) {
+    const active = quests.filter((q) => state.status[q.id] === 'active' && (onMap(q) || !q.maps.length));
+    const kit = { quests: active, keys: new Map(), plant: [], use: [], gear: [] };
+    for (const q of active) {
       for (const k of q.keys) {
         if (KIT_FOUND_RE.test(k.condition)) continue;
         const entry = kit.keys.get(k.name) ?? { ...k, quests: [] };
@@ -518,10 +518,17 @@
     toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
   }
 
-  function openLightbox(src) {
+  function openLightbox(src, full) {
     const box = $('#lightbox');
-    box.querySelector('img').src = src.replace(/\/scale-to-(width|height)(-down)?\/\d+/, '');
+    const img = box.querySelector('img');
+    img.src = src;
     box.hidden = false;
+    if (!full) return;
+    // The site's own copy shows at once; the wiki original replaces it only
+    // where the wiki's image host can be reached.
+    const big = new Image();
+    big.onload = () => { if (!box.hidden && img.getAttribute('src') === src) img.src = big.src; };
+    big.src = full.replace(/\/scale-to-(width|height)(-down)?\/\d+/, '');
   }
 
   // ---------- events ----------
@@ -576,7 +583,7 @@
     const img = e.target.closest('.wiki img, .banner');
     if (img && img.naturalWidth > 80) {
       e.preventDefault();
-      openLightbox(img.closest('a.image')?.href || img.src);
+      openLightbox(img.getAttribute('src'), img.closest('a.image')?.href);
     }
   });
 

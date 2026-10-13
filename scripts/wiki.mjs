@@ -6,7 +6,7 @@ import path from 'node:path';
 export const WIKI = 'https://escapefromtarkov.fandom.com/ru';
 const API = `${WIKI}/api.php`;
 const CACHE_DIR = path.resolve(import.meta.dirname, '..', '.cache');
-const UA = 'TarkovQuestsHelper/1.0 (personal quest tracker)';
+export const UA = 'TarkovQuestsHelper/1.0 (personal quest tracker)';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
