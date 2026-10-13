@@ -27,7 +27,7 @@ body {
 }
 
 a { color: var(--link); }
-button, input { font: inherit; color: inherit; }
+button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 
 /* ---------- top bar ---------- */
@@ -129,7 +129,12 @@ button { cursor: pointer; }
 .sidebar { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: var(--panel); }
 .list-filters { display: flex; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
 .list-search { padding: 8px 14px; border-bottom: 1px solid var(--line); }
-.list-filters .act-btn {
+.list-map { display: flex; gap: 8px; padding: 8px 14px; border-bottom: 1px solid var(--line); }
+#map { flex: 1 1 auto; min-width: 0; background: #0a0a09; border: 1px solid var(--line); border-radius: 3px; padding: 5px 8px; }
+#map option { background: var(--panel-2); color: var(--text); }
+#map.on { border-color: var(--gold); color: var(--gold); }
+.list-map .act-btn { flex: 0 0 auto !important; padding: 7px 12px !important; }
+.list-filters .act-btn, .list-map .act-btn {
   flex: 1 1 auto;
   min-width: 0;
   padding: 7px 6px;
@@ -306,6 +311,29 @@ button { cursor: pointer; }
 .lightbox { position: fixed; inset: 0; z-index: 100; background: #000d; display: grid; place-items: center; cursor: zoom-out; }
 .lightbox[hidden], .toast[hidden] { display: none; }
 .lightbox img { max-width: 96vw; max-height: 96vh; }
+
+.kit {
+  width: min(760px, 94vw);
+  max-height: 88vh;
+  padding: 0;
+  color: var(--text);
+  background: var(--bg);
+  border: 1px solid #45463f;
+  border-radius: 4px;
+  box-shadow: 0 12px 40px #000c;
+}
+.kit::backdrop { background: #000b; }
+.kit-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 18px; background: var(--panel-2); border-bottom: 1px solid var(--line); }
+.kit-head h1 { margin: 0; font-size: 18px; color: var(--bright); }
+.kit-head small { display: block; font-size: 13px; font-weight: 400; color: var(--muted); }
+.kit-body { padding: 16px 18px 4px; }
+.kit-line { padding: 7px 0; color: var(--bright); }
+.kit-line + .kit-line { border-top: 1px solid var(--line); }
+.kit-line.optional { color: var(--text); }
+.kit-quest { display: block; padding: 0; font-size: 13px; color: var(--link); background: none; border: 0; text-align: left; }
+.kit-quest:hover { text-decoration: underline; }
+.kit .key .kit-quest { margin-top: 4px; }
+.kit-note { margin: 0 0 16px; font-size: 13px; color: var(--muted); }
 
 .toast {
   position: fixed;

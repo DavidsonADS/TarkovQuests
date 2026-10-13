@@ -19,7 +19,7 @@
 
   // ---------- state ----------
 
-  const defaults = { status: {}, level: 0, filters: {}, v: 2, autosave: true, trader: DATA.traders[0].name, selected: null, showDone: false, showLocked: false };
+  const defaults = { status: {}, level: 0, filters: {}, v: 2, autosave: true, trader: DATA.traders[0].name, map: '', selected: null, showDone: false, showLocked: false };
   let state = load();
 
   function load() {
@@ -136,6 +136,22 @@
       </button>`;
   }
 
+  const onMap = (q) => !state.map || q.maps.includes(state.map);
+
+  function renderMaps() {
+    const counts = new Map();
+    for (const q of DATA.quests.filter(visible)) {
+      for (const m of q.maps) counts.set(m, (counts.get(m) ?? 0) + (state.status[q.id] === 'active' ? 1 : 0));
+    }
+    if (!counts.has(state.map)) state.map = '';
+    const names = [...counts.keys()].sort((a, b) => a.localeCompare(b, 'ru'));
+    const sel = $('#map');
+    sel.innerHTML = '<option value="">Все локации</option>'
+      + names.map((m) => `<option value="${esc(m)}">${esc(m)}${counts.get(m) ? ` — активных: ${counts.get(m)}` : ''}</option>`).join('');
+    sel.value = state.map;
+    sel.classList.toggle('on', !!state.map);
+  }
+
   function renderList() {
     const query = $('#search').value.trim().toLowerCase();
     let pool = DATA.quests.filter(visible);
@@ -150,6 +166,10 @@
     } else {
       pool = pool.filter((q) => q.trader === state.trader);
     }
+    // Quests with no location can be done on any map, so they stay in sight.
+    const mapped = !!state.map && !query;
+    const anywhere = mapped ? pool.filter((q) => !q.maps.length && ['active', 'available'].includes(statusOf(q))) : [];
+    if (mapped) pool = pool.filter(onMap);
     const groups = [
       ['active', 'Активные', true],
       ['available', 'Доступные', true],
@@ -163,10 +183,15 @@
       if (key === 'locked') items.sort((a, b) => a.level - b.level || a.id.localeCompare(b.id, 'ru'));
       html += `<h3 class="group ${key}">${label} <span>${items.length}</span></h3>${items.map((q) => listRow(q, showTrader)).join('')}`;
     }
-    if (!html) {
+    if (!html && mapped) {
+      html = `<div class="empty">На локации «${esc(state.map)}» здесь ничего нет.</div>`;
+    } else if (!html) {
       html = state.trader === ACTIVE_TAB && !query
         ? '<div class="empty">Нет активных квестов. Выберите торговца и нажмите «Принять» на квесте.</div>'
         : '<div class="empty">Здесь пусто. Включите «Заблокированные» или «Завершённые» выше.</div>';
+    }
+    if (anywhere.length) {
+      html += `<h3 class="group">Без привязки к локации <span>${anywhere.length}</span></h3>${anywhere.map((q) => listRow(q, showTrader)).join('')}`;
     }
     $('#list').innerHTML = html;
   }
@@ -255,8 +280,93 @@
     el.scrollTop = 0;
   }
 
+  // ---------- what to bring ----------
+  // Built from the goal lines of active quests; the wiki has no per-goal
+  // progress, so goals the player already finished are listed too.
+
+  const KIT_GROUPS = [
+    ['plant', 'Заложить и установить', /^(установить|заложить|оставить|спрятать|положить)/i],
+    ['use', 'Использовать на месте', /^(пометить|засветить|подать|починить|отремонтировать|перепрошить|воспользоваться)/i],
+    ['gear', 'Оружие и снаряжение', /^(убить|устранить|ликвидировать|уничтожить).*(использ|надев|надет|экипиров|одевшись|\sиз\s|\sбез\s|глушител|прицел)/i],
+  ];
+  const KIT_KEY_RE = /^ключ|карта доступа|keycard/i;
+  const KIT_FOUND_RE = /подбираем|для передачи/i;
+  const OPTIONAL_RE = /^\(опционально\)\s*/i;
+  const mapNames = new Set(DATA.quests.flatMap((q) => q.maps));
+
+  function goalLines(q) {
+    const doc = new DOMParser().parseFromString(q.goals, 'text/html');
+    return [...doc.querySelectorAll('li')].map((li) => {
+      const own = li.cloneNode(true);
+      own.querySelectorAll('ul, ol').forEach((n) => n.remove());
+      const text = own.textContent.replace(/\s+/g, ' ').trim();
+      const maps = [...own.querySelectorAll('a[title]')].map((a) => a.title).filter((t) => mapNames.has(t));
+      return { text, body: text.replace(OPTIONAL_RE, ''), maps, optional: OPTIONAL_RE.test(text) };
+    });
+  }
+
+  function collectKit() {
+    const quests = DATA.quests.filter((q) => state.status[q.id] === 'active' && (onMap(q) || !q.maps.length));
+    const kit = { quests, keys: new Map(), plant: [], use: [], gear: [] };
+    for (const q of quests) {
+      for (const k of q.keys) {
+        if (!KIT_KEY_RE.test(k.name) || KIT_FOUND_RE.test(k.condition)) continue;
+        const entry = kit.keys.get(k.name) ?? { ...k, quests: [] };
+        entry.quests.push(q.id);
+        kit.keys.set(k.name, entry);
+      }
+      for (const line of goalLines(q)) {
+        // A goal that names another map belongs to a different raid.
+        if (state.map && line.maps.length && !line.maps.includes(state.map)) continue;
+        const group = KIT_GROUPS.find(([, , re]) => re.test(line.body));
+        if (group) kit[group[0]].push({ ...line, quest: q.id });
+      }
+    }
+    return kit;
+  }
+
+  function openKit() {
+    const kit = collectKit();
+    const questBtn = (id) => `<button class="kit-quest" data-quest="${esc(id)}">${esc(id)}</button>`;
+    const keys = [...kit.keys.values()];
+    let body = '';
+    if (keys.length) {
+      body += `<section class="block keys"><h2>Ключи <span>${keys.length}</span></h2>${keys.map((k) => `
+        <div class="key">
+          ${k.icon ? `<img src="${esc(k.icon)}" alt="">` : '<span class="key-ph">🔑</span>'}
+          <div>
+            <a href="${esc(k.url)}" target="_blank" rel="noopener noreferrer">${esc(k.name)}</a>
+            ${k.condition ? `<span class="cond">${esc(k.condition)}</span>` : ''}
+            ${k.note ? `<p>${esc(k.note)}</p>` : ''}
+            ${k.quests.map(questBtn).join('')}
+          </div>
+        </div>`).join('')}</section>`;
+    }
+    for (const [key, label] of KIT_GROUPS) {
+      if (!kit[key].length) continue;
+      body += `<section class="block"><h2>${label} <span>${kit[key].length}</span></h2>${kit[key].map((l) => `
+        <div class="kit-line ${l.optional ? 'optional' : ''}">${esc(l.text)}${questBtn(l.quest)}</div>`).join('')}</section>`;
+    }
+    if (!kit.quests.length) {
+      body = `<div class="empty">Нет активных квестов${state.map ? ` на локации «${esc(state.map)}»` : ''}. Примите квест у торговца — и здесь появится, что под него взять.</div>`;
+    } else if (!body) {
+      body = '<div class="empty">Для этих квестов ничего особенного брать не нужно: ни ключей, ни предметов для закладки.</div>';
+    } else {
+      body += '<p class="kit-note">Список собран по целям активных квестов с вики. Выполненные цели внутри квеста сайт не отслеживает — уже заложенное просто пропустите. Нажмите на название квеста, чтобы открыть его.</p>';
+    }
+    $('#kit').innerHTML = `
+      <div class="kit-head">
+        <h1>Что взять с собой<small>${esc(state.map || 'Все локации')} · активных квестов: ${kit.quests.length}</small></h1>
+        <button class="act-btn" data-close>Закрыть</button>
+      </div>
+      <div class="kit-body">${body}</div>`;
+    $('#kit').showModal();
+    $('#kit').scrollTop = 0;
+  }
+
   function render() {
     renderTraders();
+    renderMaps();
     renderList();
     renderDetail();
     save();
@@ -329,6 +439,13 @@
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') $('#lightbox').hidden = true; });
 
   $('#search').addEventListener('input', renderList);
+  $('#map').addEventListener('change', (e) => { state.map = e.target.value; render(); });
+  $('#kit-open').addEventListener('click', openKit);
+  $('#kit').addEventListener('click', (e) => {
+    const quest = e.target.closest('[data-quest]');
+    if (quest) select(quest.dataset.quest);
+    if (quest || e.target.closest('[data-close]') || e.target === e.currentTarget) $('#kit').close();
+  });
   $('#level').addEventListener('change', (e) => {
     state.level = Math.max(0, Math.min(79, parseInt(e.target.value, 10) || 0));
     render();

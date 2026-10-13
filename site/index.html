@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Квесты Таркова — что делать и какой ключ нужен</title>
-  <link rel="stylesheet" href="style.css?v=6">
+  <link rel="stylesheet" href="style.css?v=8">
 </head>
 <body>
   <header class="topbar">
@@ -43,6 +43,10 @@
         <button id="show-done" type="button" class="act-btn" aria-pressed="false">Завершённые</button>
         <button id="show-locked" type="button" class="act-btn" aria-pressed="false">Заблокированные</button>
       </div>
+      <div class="list-map">
+        <select id="map" aria-label="Локация"></select>
+        <button id="kit-open" type="button" class="act-btn" title="Ключи и предметы для активных квестов на выбранной локации">Что взять</button>
+      </div>
       <div class="list-search"><input id="search" type="search" placeholder="Поиск квеста…" autocomplete="off"></div>
       <div id="list" class="list"></div>
     </aside>
@@ -54,11 +58,12 @@
     Неофициальный фанатский проект, не связан с Battlestate Games. <span id="built"></span>
   </footer>
 
+  <dialog id="kit" class="kit"></dialog>
   <div id="lightbox" class="lightbox" hidden><img alt=""></div>
   <div id="toast" class="toast" hidden></div>
 
-  <script src="config.js?v=6"></script>
+  <script src="config.js?v=8"></script>
   <script src="data/quests.js"></script>
-  <script src="app.js?v=6"></script>
+  <script src="app.js?v=8"></script>
 </body>
 </html>
