@@ -224,7 +224,7 @@ button.ll:hover { background: var(--gold); }
   background: var(--panel);
   z-index: 1;
 }
-.group span { font-weight: 400; }
+.group span { float: right; font-weight: 400; }
 .group.active { color: var(--gold); }
 .group.available { color: var(--green); }
 

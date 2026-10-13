@@ -259,7 +259,9 @@
         if (!items.length) continue;
         items.sort((a, b) => order.indexOf(statusOf(a)) - order.indexOf(statusOf(b)));
         const label = n === 5 ? 'Скрыты в игре' : leveled ? `<i class="ll">${ROMAN[n]}</i> Уровень лояльности ${n}` : 'Задания';
-        html += `<h3 class="group">${label} <span>${items.length}</span></h3>${items.map((q) => listRow(q, showTrader)).join('')}`;
+        // No counter after a loyalty level: next to its number it reads as one more number.
+        const count = n === 5 || !leveled ? ` <span>${items.length}</span>` : '';
+        html += `<h3 class="group">${label}${count}</h3>${items.map((q) => listRow(q, showTrader)).join('')}`;
       }
     }
     if (!html && mapped) {
