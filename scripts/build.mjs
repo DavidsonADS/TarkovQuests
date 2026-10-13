@@ -8,6 +8,11 @@ import { WIKI, categoryMembers, wikitexts, parsedHtml, redirects, pool } from '.
 const OUT = path.resolve(import.meta.dirname, '..', 'site', 'data', 'quests.js');
 const TRADER_ORDER = ['Прапор', 'Терапевт', 'Скупщик', 'Лыжник', 'Миротворец', 'Механик', 'Барахольщик', 'Егерь', 'Реф', 'Смотритель', 'Водитель БТР'];
 const KEY_RE = /(^|[\s«"(])(ключ|ключ-карта|ключи)([\s,.)»"-]|$)|карта доступа|keycard/i;
+// Things the wiki calls "ключ" that open nothing: table captions describing a
+// spot ("3 этаж, …, нужен Ключ РБ-ОБ"), wrenches and encryption keys.
+const NOT_KEY_RE = /[,.]|\(ключ|^ключ на |разводной|шарнирный|трещоточный|шифрования/i;
+// A key the quest asks to hand over is a goal, not something to unlock with.
+const isKey = (k) => KEY_RE.test(k.name) && !NOT_KEY_RE.test(k.name) && !/для передачи/i.test(k.condition ?? '');
 
 // ---------- wikitext infobox ----------
 
@@ -145,10 +150,12 @@ function parsePage(html, questTitles, redirectMap) {
   }
   const goalsDom = cheerio.load(out.goals + out.guide);
   const keys = new Map();
-  for (const it of out.items) if (KEY_RE.test(it.name)) keys.set(it.name, it);
+  for (const it of out.items) if (isKey(it)) keys.set(it.name, it);
+  // Items the tables already ruled out must not come back through a link.
+  const listed = new Set(out.items.map((it) => it.name));
   goalsDom('a[title]').each((_, a) => {
     const title = goalsDom(a).attr('title');
-    if (KEY_RE.test(title) && !/^Ключи$/.test(title) && !keys.has(title)) {
+    if (isKey({ name: title }) && !/^Ключи$/.test(title) && !keys.has(title) && !listed.has(title)) {
       keys.set(title, { name: title, url: goalsDom(a).attr('href'), icon: '', note: '' });
     }
   });
@@ -233,7 +240,25 @@ await pool(titles, 4, async (title) => {
 });
 quests.sort((a, b) => a.id.localeCompare(b.id, 'ru'));
 
-const traderNames = [...new Set(quests.map((q) => q.trader))].sort((a, b) => {
+// Keys mentioned only in the goal text have no icon: borrow it from another
+// quest that lists the same key in a table, else from the key's own page.
+console.log('Fetching key icons…');
+const keyIcons = new Map();
+for (const q of quests) for (const k of q.keys) if (k.icon) keyIcons.set(k.name, k.icon);
+const iconless = [...new Set(quests.flatMap((q) => q.keys).filter((k) => !k.icon && !keyIcons.has(k.name)).map((k) => k.name))];
+await pool(iconless, 4, async (name) => {
+  try {
+    const $ = cheerio.load(await parsedHtml(name));
+    const images = $('.va-infobox img').map((_, img) => imgSrc($(img))).get();
+    const icon = images.find((src) => /icon/i.test(src)) ?? images[0];
+    if (icon) keyIcons.set(name, icon);
+  } catch (e) {
+    console.log(`  no icon for ${name}: ${e.message}`);
+  }
+});
+for (const q of quests) for (const k of q.keys) k.icon ||= keyIcons.get(k.name) ?? '';
+
+const traderNames =[...new Set(quests.map((q) => q.trader))].sort((a, b) => {
   const ia = TRADER_ORDER.indexOf(a), ib = TRADER_ORDER.indexOf(b);
   return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b, 'ru');
 });

@@ -289,8 +289,8 @@
     ['use', 'Использовать на месте', /^(пометить|засветить|подать|починить|отремонтировать|перепрошить|воспользоваться)/i],
     ['gear', 'Оружие и снаряжение', /^(убить|устранить|ликвидировать|уничтожить).*(использ|надев|надет|экипиров|одевшись|\sиз\s|\sбез\s|глушител|прицел)/i],
   ];
-  const KIT_KEY_RE = /^ключ|карта доступа|keycard/i;
-  const KIT_FOUND_RE = /подбираем|для передачи/i;
+  // Keys picked up during the quest itself are not brought into the raid.
+  const KIT_FOUND_RE = /подбираем/i;
   const OPTIONAL_RE = /^\(опционально\)\s*/i;
   // Goals name maps in any grammatical case ("на Развязке", "в Лесу"), often
   // without a link, so each map is matched by its stem.
@@ -321,7 +321,7 @@
     const kit = { quests, keys: new Map(), plant: [], use: [], gear: [] };
     for (const q of quests) {
       for (const k of q.keys) {
-        if (!KIT_KEY_RE.test(k.name) || KIT_FOUND_RE.test(k.condition)) continue;
+        if (KIT_FOUND_RE.test(k.condition)) continue;
         const entry = kit.keys.get(k.name) ?? { ...k, quests: [] };
         entry.quests.push(q.id);
         kit.keys.set(k.name, entry);
