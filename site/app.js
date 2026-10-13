@@ -321,8 +321,16 @@
     render();
     autosave();
   });
-  $('#show-done').addEventListener('change', (e) => { state.showDone = e.target.checked; render(); });
-  $('#show-locked').addEventListener('change', (e) => { state.showLocked = e.target.checked; render(); });
+  const listToggles = [['#show-done', 'showDone'], ['#show-locked', 'showLocked']];
+  function showToggles() {
+    for (const [sel, key] of listToggles) {
+      $(sel).classList.toggle('primary', state[key]);
+      $(sel).setAttribute('aria-pressed', state[key]);
+    }
+  }
+  for (const [sel, key] of listToggles) {
+    $(sel).addEventListener('click', () => { state[key] = !state[key]; showToggles(); render(); });
+  }
   document.querySelectorAll('[data-filter]').forEach((cb) => {
     cb.checked = !!state.filters[cb.dataset.filter];
     cb.addEventListener('change', () => { state.filters[cb.dataset.filter] = cb.checked; render(); });
@@ -492,8 +500,7 @@
     $('#donate').hidden = false;
   }
   $('#level').value = state.level || '';
-  $('#show-done').checked = state.showDone;
-  $('#show-locked').checked = state.showLocked;
+  showToggles();
   $('#built').textContent = `Данные от ${new Date(DATA.built).toLocaleDateString('ru-RU')}.`;
   if (state.trader !== ACTIVE_TAB && !DATA.traders.some((t) => t.name === state.trader)) state.trader = DATA.traders[0].name;
   fromHash();
